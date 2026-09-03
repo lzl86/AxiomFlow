@@ -24,19 +24,19 @@
 
 ### AxiomFlow 的破局解法
 
+<div align="center">
+
+| 📄 1. 文献客观切片 | ➔ | 📐 2. 多模态反编译 | ➔ | ⚡ 3. 拓扑因果推演 |
+| :---: | :-: | :---: | :-: | :---: |
+| **论文原版高清切片**<br><sub>Mathpix 级任意拉框裁剪</sub> | *Gemini 视觉* | **标准 LaTeX 表达式**<br><sub>KaTeX 矢量公式与参数释义</sub> | *有向连线* | **无幻觉严密推演**<br><sub>有效祖先拓扑上下文隔离</sub> |
+
+</div>
+
 ```mermaid
-flowchart LR
-    A["📄 论文原版高清视觉切片"] -->|"Gemini 视觉反编译"| B["📐 标准 LaTeX 公式与参数释义"]
-    B -->|"有向连线挂载"| C["⚡ 物理级拓扑隔离推演"]
-
-    style A fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
-    style B fill:#0f172a,stroke:#34d399,stroke-width:2px,color:#f8fafc
-    style C fill:#0f172a,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+graph LR
+    A[📄 论文原版高清视觉切片] -->|Gemini 视觉反编译| B[📐 标准 LaTeX 公式与参数释义]
+    B -->|有向连线挂载| C[⚡ 物理级拓扑隔离推演]
 ```
-
-$$
-\text{GroundTruth}_{\text{Paper}} \xrightarrow[\text{Multimodal OCR}]{\text{Gemini Vision}} \text{Formula}_{\text{LaTeX}} \xrightarrow[\text{Context Isolation}]{\text{DAG Topology}} \text{Rigorous Reasoning}
-$$
 
 * **客观事实锚点 (Ground Truth Anchor)**：所有结论必须挂载真实的论文出处与页码（如 `P.50`）；
 * **拓扑上下文隔离 (Topological Context Isolation)**：仅连入的有效祖先节点进入大模型 Prompt，剪断的分支 100% 物理剥离；
