@@ -24,7 +24,19 @@
 
 ### AxiomFlow 的破局解法
 
-$$\text{论文原版高清视觉切片} \xrightarrow{\text{Gemini 视觉反编译}} \text{标准 LaTeX 公式} \xrightarrow{\text{连入 DAG 实证}} \text{物理级拓扑隔离推演}$$
+```mermaid
+flowchart LR
+    A["📄 论文原版高清视觉切片"] -->|"Gemini 视觉反编译"| B["📐 标准 LaTeX 公式与参数释义"]
+    B -->|"有向连线挂载"| C["⚡ 物理级拓扑隔离推演"]
+
+    style A fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style B fill:#0f172a,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    style C fill:#0f172a,stroke:#818cf8,stroke-width:2px,color:#f8fafc
+```
+
+$$
+\text{GroundTruth}_{\text{Paper}} \xrightarrow[\text{Multimodal OCR}]{\text{Gemini Vision}} \text{Formula}_{\text{LaTeX}} \xrightarrow[\text{Context Isolation}]{\text{DAG Topology}} \text{Rigorous Reasoning}
+$$
 
 * **客观事实锚点 (Ground Truth Anchor)**：所有结论必须挂载真实的论文出处与页码（如 `P.50`）；
 * **拓扑上下文隔离 (Topological Context Isolation)**：仅连入的有效祖先节点进入大模型 Prompt，剪断的分支 100% 物理剥离；
