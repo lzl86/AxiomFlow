@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AxiomFlow · Scientific Reasoning & Grounding Engine</title>
+  <link rel="stylesheet" href="./vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="./vendor/pdfjs/pdf_viewer.min.css">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./vendor/katex/katex.min.js"></script>
+  <script src="./vendor/katex/auto-render.min.js"></script>
+  <script src="./marked.min.js"></script>
+  <script src="./vendor/pdfjs/pdf.min.js"></script>
+</head>
+<body>
+
+  <!-- 顶部导航条 -->
+  <header class="navbar">
+    <div class="brand">
+      <button id="btn-toggle-sidebar" class="btn-sidebar-toggle" title="展开/收起课题列表 (Ctrl+B)">
+        <span class="icon-hamburger">☰</span>
+      </button>
+      <span class="logo-badge">DAG</span>
+      <span class="brand-title">AxiomFlow</span>
+      <!-- 当前课题胶囊指示器 -->
+      <div class="session-badge" id="session-badge" title="当前活跃课题 (点击快速展开课题列表)">
+        <span class="session-badge-icon">📁</span>
+        <span id="current-session-title">定量相位成像</span>
+        <span class="session-badge-arrow">▾</span>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="status-pill">
+        <span class="status-dot"></span>
+        <span id="status-text">就绪 · 模型: Gemini 3.8 Flash (High)</span>
+      </div>
+
+      <button id="btn-add-question" class="btn btn-primary">
+        <span>+ 新增科研问题</span>
+      </button>
+
+      <button id="btn-add-material" class="btn">
+        <span>📑 引入文献片段</span>
+      </button>
+
+      <button id="btn-toggle-reader" class="btn btn-success">
+        <span>📖 打开文献阅读器</span>
+      </button>
+
+      <button id="btn-open-settings" class="btn" title="配置 API 端口与模型调度">
+        <span>⚙️ 模型配置</span>
+      </button>
+
+      <button id="btn-reset-demo" class="btn" title="重载初始科研流程示例">
+        <span>↺ 重置示例</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 主画布视口 -->
+  <main id="canvas-container" class="canvas-container">
+    <div id="canvas-world" class="canvas-world">
+      <!-- SVG 连线层 -->
+      <svg id="svg-edges" class="edge-layer"></svg>
+      <!-- 节点层 -->
+      <div id="nodes-container"></div>
+    </div>
+
+    <!-- 左下角画布缩放比例控制器 -->
+    <div class="zoom-controls">
+      <button id="btn-zoom-out" class="zoom-btn" title="缩小 (−)">−</button>
+      <span id="zoom-indicator" class="zoom-text">80%</span>
+      <button id="btn-zoom-in" class="zoom-btn" title="放大 (+)">+</button>
+      <button id="btn-zoom-fit" class="zoom-btn" style="width: auto; padding: 0 8px; font-size: 11px;" title="自适应居中全图">⛶ 全景适配</button>
+    </div>
+  </main>
+
+  <!-- 左侧会话/课题管理抽屉 (Gemini 风格) -->
+  <aside id="sidebar-sessions" class="sidebar-sessions">
+    <div class="sidebar-header">
+      <div class="sidebar-title-row">
+        <span class="sidebar-title">📁 研究课题管理</span>
+        <button id="btn-close-sidebar" class="sidebar-close-btn" title="收起边栏 (Esc / Ctrl+B)">✕</button>
+      </div>
+      <button id="btn-new-session" class="btn btn-primary btn-new-session" title="创建全新独立研究课题">
+        <span>+ 新建研究课题</span>
+      </button>
+    </div>
+    <div id="sessions-list" class="sessions-list">
+      <!-- 动态注入课题项 -->
+    </div>
+    <div class="sidebar-footer">
+      <span id="sessions-summary">共 1 个课题</span>
+      <span style="font-size: 11px; color: #64748b;">快捷键: Ctrl+B</span>
+    </div>
+  </aside>
+  <div id="sidebar-backdrop" class="sidebar-backdrop" style="display: none;"></div>
+
+  <!-- 右侧抽屉面板 (默认占据半屏 50vw，支持无级拖拽调宽) -->
+  <aside id="drawer" class="drawer">
+    <div id="drawer-resizer" class="drawer-resizer" title="左右拖动调节文献与图谱分屏比例 · 双击直接还原 50% 半屏"></div>
+    <div class="drawer-tabs">
+      <div class="drawer-tab active" data-tab="inspector">🔍 上下文审查器</div>
+      <div class="drawer-tab" data-tab="reader">📖 文献阅读与摘录</div>
+      <div class="drawer-width-actions" style="margin-left: auto; display: flex; align-items: center; gap: 4px; padding-right: 6px;">
+        <button id="btn-drawer-compact" class="drawer-size-btn" title="紧凑宽度 (420px)">◧ 紧凑</button>
+        <button id="btn-drawer-half" class="drawer-size-btn active" title="半屏宽度 (50vw)">◨ 50%半屏</button>
+        <button id="btn-drawer-wide" class="drawer-size-btn" title="宽屏沉浸 (70vw)">⛶ 70%</button>
+      </div>
+      <button id="btn-close-drawer" style="background: none; border: none; color: #94a3b8; font-size: 16px; padding: 0 12px; cursor: pointer;" title="关闭抽屉">✕</button>
+    </div>
+
+    <!-- 选项卡 1：上下文审查 -->
+    <div id="inspector-panel" class="drawer-body">
+      <div id="inspector-content">
+        <div style="color: #64748b; padding: 20px;">点击画布上的任意节点，查看模型实际接收的拓扑上下文。</div>
+      </div>
+    </div>
+
+    <!-- 选项卡 2：文献阅读器 -->
+    <div id="reader-panel" class="drawer-body" style="display: none; position: relative; height: 100%; display: flex; flex-direction: column;">
+      <div style="margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; flex-shrink: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <h3 id="paper-title" style="font-size: 13.5px; font-weight: 600; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;" title="当前文献">
+            文献原文：Lost in the Middle (TACL 2023)
+          </h3>
+          <div style="display: flex; gap: 6px; flex-shrink: 0;">
+            <label class="btn btn-secondary" style="font-size: 11px; padding: 4px 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.4); color: #c7d2fe;" title="从本地电脑上传 PDF/TXT/MD 论文">
+              📂 上传文献
+              <input type="file" id="input-upload-file" accept=".pdf,.txt,.md,.markdown,.json,.tex" style="display: none;">
+            </label>
+            <button id="btn-quick-open-thesis" class="btn btn-secondary" style="font-size: 11px; padding: 4px 9px; display: inline-flex; align-items: center; gap: 4px; border-color: rgba(16, 185, 129, 0.4); color: #a7f3d0; background: rgba(16, 185, 129, 0.12);" title="一键载入《差分相衬显微成像》博士论文原版 PDF">
+              🎓 博士论文PDF
+            </button>
+            <button id="btn-import-whole-doc" onclick="importEntireDocumentAsMaterial()" class="btn btn-secondary" style="font-size: 11px; padding: 4px 9px; display: inline-flex; align-items: center; gap: 4px;" title="将当前文档全文或当前页存为实证卡片">
+              📑 全文入图
+            </button>
+          </div>
+        </div>
+
+        <!-- PDF 原生导航工具栏 (页码切换、缩放、跳页) -->
+        <div id="pdf-toolbar" style="display: none; align-items: center; justify-content: space-between; margin-top: 8px; padding: 5px 8px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px; color: #cbd5e1;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <button id="pdf-prev" class="btn" style="padding: 2px 8px; font-size: 11px;">◀ 上一页</button>
+            <span>第 <input id="pdf-page-input" type="number" value="1" min="1" style="width: 42px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff; text-align: center; border-radius: 4px; font-size: 11px; padding: 1px;"> / <span id="pdf-page-count">-</span> 页</span>
+            <button id="pdf-next" class="btn" style="padding: 2px 8px; font-size: 11px;">下一页 ▶</button>
+            <button id="btn-pdf-scroll-mode" class="btn" style="padding: 2px 7px; font-size: 11px; background: rgba(99, 102, 241, 0.15); color: #c7d2fe; border-color: rgba(99, 102, 241, 0.4);" title="当前模式：连续垂直滚动 (滚轮顺滑翻页)">📜 连续阅读</button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <button id="btn-pdf-snip" class="btn" style="padding: 2px 8px; font-size: 11px; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.4); color: #fde68a;" title="开启框选模式：在公式或插图上按住鼠标左键拉框，截取高清切片入图">✂️ 框选公式/图表</button>
+            <button id="pdf-zoom-out" class="btn" style="padding: 2px 6px; font-size: 11px;" title="缩小">🔍 -</button>
+            <span id="pdf-zoom-level" style="font-size: 11px; min-width: 38px; text-align: center;">自适应</span>
+            <button id="pdf-zoom-in" class="btn" style="padding: 2px 6px; font-size: 11px;" title="放大">🔍 +</button>
+          </div>
+        </div>
+
+        <p id="reader-hint" style="font-size: 11.5px; color: #94a3b8; margin-top: 5px;">
+          支持<b>滚轮顺滑连续阅读</b>，支持在任意页面<b>划选文字</b>或点击<b>【✂️ 框选公式/图表】</b>截取切片入图。
+        </p>
+      </div>
+
+      <!-- 划词浮动工具栏 -->
+      <div id="extract-toolbar" style="display: none; position: sticky; top: 0; z-index: 100; margin-bottom: 10px;">
+        <button onclick="extractSelectedToCanvas()" class="btn btn-success" style="width: 100%; justify-content: center; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);">
+          ✨ 将圈选文字摘录至画布 (生成证据锚点)
+        </button>
+      </div>
+
+      <!-- 视图 1：Markdown 文本文档视图 -->
+      <div id="paper-content" style="font-size: 12.5px; line-height: 1.6; color: #cbd5e1; user-select: text; overflow-y: auto; flex: 1;">
+        正在载入文献...
+      </div>
+
+      <!-- 视图 2：PDF 原生连续垂直滚动视图 (支持公式/插图秒级渲染与高精度截框) -->
+      <div id="pdf-view-container" style="display: none; flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; background: #0b0f19; border-radius: 6px; border: 1px solid var(--border-color); text-align: center; padding: 14px 0; scroll-behavior: smooth;">
+        <div id="pdf-continuous-scroll" style="display: block; position: relative; margin: 0 auto; text-align: center; width: 100%;">
+          <!-- 动态按需渲染所有连续页 -->
+        </div>
+        <!-- 截框全局蒙层 -->
+        <div id="pdf-snip-overlay" style="display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; cursor: crosshair; z-index: 80; background: rgba(0,0,0,0.01);">
+          <div id="pdf-snip-box" style="display: none; position: absolute; border: 2px dashed #f59e0b; background: rgba(245, 158, 11, 0.18); box-shadow: 0 0 16px rgba(245, 158, 11, 0.5); pointer-events: none; border-radius: 3px; z-index: 85;">
+            <span style="position: absolute; bottom: -22px; right: 0; background: #f59e0b; color: #000; font-size: 10px; font-weight: bold; padding: 1px 5px; border-radius: 2px; white-space: nowrap;">松开完成截框入图</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 深入询问概念与分支展开弹窗 -->
+  <div id="inquiry-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">💡</span>
+          <div>
+            <h3 style="font-size: 15px; font-weight: 600; color: #f8fafc;">针对上游论断展开概念询问</h3>
+            <p id="inquiry-parent-title" style="font-size: 12px; color: #94a3b8; margin-top: 2px;">来源节点: ...</p>
+          </div>
+        </div>
+        <button id="btn-close-inquiry" class="modal-close-btn">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- 智能识别概念建议词 -->
+        <div style="margin-bottom: 14px;">
+          <label style="font-size: 12px; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 6px;">
+            🔍 该节点中识别到的关键学术概念（点击快速填入）：
+          </label>
+          <div id="concept-chips-container" style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <!-- 动态填充概念徽章 -->
+          </div>
+        </div>
+
+        <!-- 用户自定义追问输入框 -->
+        <div style="margin-bottom: 16px;">
+          <label style="font-size: 12px; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 6px;">
+            ✍️ 请输入你想深入询问或推演的问题 / 假说：
+          </label>
+          <textarea id="inquiry-question-input" rows="4" class="inquiry-textarea" placeholder="例如：请通俗直观地解释一下【定量相位成像】的核心概念与典型应用场景..."></textarea>
+        </div>
+
+        <!-- 自动调用大模型生成 -->
+        <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px;">
+          <label style="font-size: 12px; color: #cbd5e1; display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="inquiry-auto-ask" checked style="accent-color: #6366f1;">
+            <span>创建后立即调用 <strong id="inquiry-model-name" style="color: #818cf8;">Gemini 3.8 Flash (High)</strong> 原地完成推理解答</span>
+          </label>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button id="btn-cancel-inquiry" class="btn">取消</button>
+          <button id="btn-submit-inquiry" class="btn btn-primary" style="padding: 8px 18px;">
+            🚀 确认并展开新分支节点
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模型与接口设置弹窗 -->
+  <div id="settings-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card" style="width: 520px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">⚙️</span>
+          <h3 style="font-size: 15px; font-weight: 600; color: #f8fafc;">Antigravity Manager API 调度配置</h3>
+        </div>
+        <button id="btn-close-settings" class="modal-close-btn">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div style="margin-bottom: 14px;">
+          <label style="font-size: 12px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">本地反代接口 (API Base)</label>
+          <input id="cfg-api-base" type="text" class="inquiry-textarea" style="height: 38px; resize: none;" value="http://127.0.0.1:8046/v1">
+        </div>
+
+        <div style="margin-bottom: 14px;">
+          <label style="font-size: 12px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">API 密钥 (API Key)</label>
+          <input id="cfg-api-key" type="password" class="inquiry-textarea" style="height: 38px; resize: none;" placeholder="sk-...">
+        </div>
+
+        <div style="margin-bottom: 18px;">
+          <label style="font-size: 12px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">推理模型选择 (Model)</label>
+          <select id="cfg-model-select" class="inquiry-textarea" style="height: 40px; cursor: pointer; color: #34d399; font-weight: 600;">
+            <option value="gemini-3.8-flash-high" selected>gemini-3.8-flash-high (当前推荐)</option>
+            <option value="gemini-3.8-flash-medium">gemini-3.8-flash-medium</option>
+            <option value="gemini-3.8-flash-low">gemini-3.8-flash-low</option>
+            <option value="gemini-3.8-flash-tiered">gemini-3.8-flash-tiered</option>
+            <option value="gemini-3.7-flash">gemini-3.7-flash</option>
+            <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet-20241022</option>
+            <option value="claude-opus-4-5-thinking">claude-opus-4-5-thinking</option>
+            <option value="gpt-4o">gpt-4o</option>
+          </select>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button id="btn-cancel-settings" class="btn">取消</button>
+          <button id="btn-save-settings" class="btn btn-primary">保存配置</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 单卡片沉浸式全屏学术阅读弹窗 (双击卡片或点击卡片右上角放大图标触发) -->
+  <div id="card-modal" class="modal-backdrop" style="display: none;">
+    <div class="card-modal-container">
+      <div class="card-modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span id="modal-card-badge" class="node-badge" style="font-size: 11px; padding: 3px 8px;"></span>
+          <h3 id="modal-card-title" style="font-size: 16px; font-weight: 700; color: #f8fafc; margin: 0;"></h3>
+          <span id="modal-card-id" style="font-size: 11.5px; color: #64748b; font-family: monospace;"></span>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button id="modal-btn-copy" class="btn" style="padding: 4px 10px; font-size: 12px;" title="复制当前卡片完整 Markdown 文本">📋 复制内容</button>
+          <button id="btn-close-card-modal" class="modal-close-btn" title="关闭 (Esc)">✕</button>
+        </div>
+      </div>
+
+      <div id="modal-card-body" class="card-modal-body markdown-body"></div>
+
+      <div class="card-modal-footer">
+        <div id="modal-card-topology" style="font-size: 12px; color: #94a3b8; display: flex; gap: 16px;"></div>
+        <div style="font-size: 11px; color: #64748b;">💡 提示：在画布上双击任意卡片均可进入全屏阅读 · 按 Esc 退出</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 划词快捷工具栏 (Floating Selection Toolbar) -->
+  <div id="selection-toolbar" class="selection-toolbar" style="display: none;">
+    <button id="sel-btn-copy" class="sel-btn" title="复制划线文本到剪贴板">
+      <span class="sel-icon">📋</span> 复制
+    </button>
+    <button id="sel-btn-inquiry" class="sel-btn" title="以此概念展开新课题追问">
+      <span class="sel-icon">💡</span> 追问概念
+    </button>
+    <button id="sel-btn-material" class="sel-btn" title="将此文本存为独立的文献实证节点">
+      <span class="sel-icon">📖</span> 存为实证
+    </button>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

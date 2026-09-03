@@ -1,0 +1,40 @@
+{
+  "activeId": "session_1788441684256",
+  "sessions": [
+    {
+      "id": "session_1788441684256",
+      "title": "惠更斯-菲涅耳原理",
+      "createdAt": 1788441684264,
+      "updatedAt": 1788448410941,
+      "nodeCount": 16
+    },
+    {
+      "id": "session_1788432065242",
+      "title": "新探索课题",
+      "createdAt": 1788432065249,
+      "updatedAt": 1788441534423,
+      "nodeCount": 1
+    },
+    {
+      "id": "session_1788431694879",
+      "title": "能量衡算方程",
+      "createdAt": 1788431694888,
+      "updatedAt": 1788441684010,
+      "nodeCount": 4
+    },
+    {
+      "id": "session_1788431511442",
+      "title": "量子纠缠与贝尔不等式实验验证",
+      "createdAt": 1788431511454,
+      "updatedAt": 1788431537453,
+      "nodeCount": 1
+    },
+    {
+      "id": "session_default",
+      "title": "定量相位成像",
+      "createdAt": 1788431143586,
+      "updatedAt": 1788441544372,
+      "nodeCount": 14
+    }
+  ]
+}

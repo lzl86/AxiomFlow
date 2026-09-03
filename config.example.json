@@ -1,0 +1,6 @@
+{
+  "api_base": "http://127.0.0.1:8046/v1",
+  "api_key": "sk-your-openai-or-gemini-compatible-api-key",
+  "model": "gemini-3.8-flash-high",
+  "temperature": 0.3
+}

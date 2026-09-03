@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+
+# Environment and sensitive keys
+.env
+config.json
+
+# Temporary test files & logs
+crop_inspect.png
+*.log
+
+# Duplicate root paper (the primary PDF is served under public/materials/)
+/王京凡-博士学位论文-差分相衬显微成像中照明调制方法及应用研究.pdf
+/王京凡-博士学位论文-差分相衬显微成像中照明调制方法及应用研究.md
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
