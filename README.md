@@ -142,6 +142,8 @@ python server.py
 AxiomFlow/
 ├── server.py              # 轻量多功能服务端 (静态文件托管、DAG 图谱同步、Gemini 多模态 OCR 路由)
 ├── config.example.json    # 大模型接口配置模板
+├── docs/                  # 架构设计决策记录 (Architecture Decision Records)
+│   └── adrs/              # 演进路线图、抗幻觉拓扑隔离范式与核心工程红线
 ├── public/                # 现代化纯净前端资产 (零打包编译负担)
 │   ├── index.html         # 主界面 (分屏工作台、顶部工具栏、课题列表抽屉)
 │   ├── style.css          # 暗色现代极客风样式 (Flexbox 弹性分屏、毛玻璃卡片、SVG 有向连线)
@@ -150,6 +152,15 @@ AxiomFlow/
 │   └── materials/         # 默认科研论文资产库
 └── sessions/              # 多课题持久化存储目录 (自动按会话隔离存储为纯文本 JSON)
 ```
+
+---
+
+## 📚 架构决议与工程演进 (Architecture Decision Records)
+
+AxiomFlow 遵循高标准的学术与企业级工程架构演进规范，所有关键设计权衡、深度排坑经验与架构红线均固化于 `docs/adrs/`：
+
+* 🏛️ **[ADR-01: 核心拓扑隔离与抗幻觉真理架构](docs/adrs/ADR-01-核心拓扑隔离与抗幻觉真理架构.md)**：深入剖析传统线性 ChatPDF 的缺陷，确立以 DAG 拓扑祖先追溯、客观事实锚定为核心的抗大模型幻觉基石。
+* 🗺️ **[ADR-02: MVP 敏捷迭代与科研安全红线](docs/adrs/ADR-02-MVP敏捷迭代路线图.md)**：详细记录 MVP 1.0 至 MVP 5.0 的阶梯式演进路线，并确立异步对象寻址强一致性、Flexbox 滚动死锁防御、零打包轻量原则等五大工程铁律。
 
 ---
 
