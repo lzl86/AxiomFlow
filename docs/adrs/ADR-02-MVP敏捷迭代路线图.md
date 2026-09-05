@@ -78,18 +78,24 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
 
 ---
 
-### 阶段 6: MVP 3.5 (单文献/单工程宏微观分层研读引擎 / Hierarchical Macro-Skeleton & Neighborhood Deep-Dive) —— [🚀 进阶演进中]
+### 阶段 6: MVP 3.5 (单文献/单工程宏微观分层研读引擎 / Hierarchical Macro-Skeleton & Neighborhood Deep-Dive) —— [🚀 宏观视窗与靶向对齐已交付(PR #1) · 邻域探针后端进阶中]
 *   **主场模块**：`server.py` (`/api/paper-outline`, `/api/paper-neighborhood`), `public/app.js`, `public/index.html`
 *   **核心突破**：
-    1. **Stage 1 全局粗读（骨架成树·宏观全景导航）**：利用长上下文大模型快速提炼全文结构化章节（或大型源码文件的函数/类结构骨架 AST Outline Tree），生成带有**物理页码/代码行号强锚点**的可交互【全景大纲树】；
-    2. **Stage 2 视界对焦（靶向定位·邻域探针）**：用户在阅读器或大纲中点击任意小节/函数，阅读器平滑卷至目标页或代码行，系统自动划定**目标页 $\pm 2$ 页（或函数上下文 $\pm 30$ 行）作为高密度上下文缓冲带（Neighborhood Buffer）**；
+    1. **Stage 1 全局粗读（骨架成树·宏观全景导航）**：
+       * **[✅ PR #1 已交付] 原生 PDF 大纲递归解析与目录树抽屉**：通过 PDF.js `doc.getOutline()` 与 `getDestination()` 动态构建侧栏章节大纲树（`#pdf-outline-panel`），每级条目绑定精确物理页码徽标（`P.xx`）；对无书签文献提供分页快速跳转向导；
+       * **[⏳ 进阶中] 长上下文大模型与源码 AST 全景骨架**：利用大模型（`/api/paper-outline`）为无内置书签的长文自动提炼结构化章节与页码强锚点；对工程源码提炼函数/类结构 AST 骨架树；
+    2. **Stage 2 视界对焦（靶向定位·邻域探针）**：
+       * **[✅ PR #1 已交付] 视界平滑卷动与目标页科技感光晕 (Halo Jump)**：点击大纲小节，视口 60FPS 垂直平滑滚动直达目标页（`scrollToPage`），并伴随 1.5 秒高亮光晕聚焦（`page-highlight`）；
+       * **[⏳ 进阶中] 邻域高密度上下文缓冲带 (Neighborhood Buffer)**：后端提供 `/api/paper-neighborhood` 接口，依据当前小节自动划定**目标页 $\pm 2$ 页（或函数上下文 $\pm 30$ 行）**的高密度物理切片；
     3. **Stage 3 显微研读（局部无幻觉推演）**：针对该板块发起深度学术探究时，大模型被精准约束在该物理邻域的公式、参数或局部调用链中，彻底解决“全局记不住、局部看不细”的困境。
-*   **验收标准**：可在阅读器侧边一键拉出章节/函数大纲树，点击“2.2 弱物体近似”自动滚动至第 50 页并高亮；对该小节发起追问时，模型仅读取邻域上下文，1~2 秒内精准解答公式细节。
+*   **验收标准**：
+    1. **[✅ 已达标]** 可在阅读器侧边一键拉出章节大纲树，点击“2.3 差分相衬显微成像实验结果”自动平滑滚动至第 49 页并激发光晕高亮；
+    2. **[⏳ 待达标]** 针对该小节发起追问时，模型自动绑定目标页 $\pm 2$ 页的邻域上下文，1~2 秒内精准解答公式细节与参数定义。
 
-### 阶段 7: MVP 4.0 (多文献跨论文交叉比对与 Obsidian 双向水合 / Cross-Paper Graph & Knowledge Hydration) —— [顺延规划]
-*   **主场模块**：`public/materials/`, `server.py` (`/api/hydrate`), `public/app.js`
+### 阶段 7: MVP 4.0 (多文献跨论文交叉比对与 Obsidian 双向水合 / Cross-Paper Graph & Knowledge Hydration) —— [顺延规划 · 文献资产底座已由 PR #1 跑通]
+*   **主场模块**：`public/materials/`, `server.py` (`/api/hydrate`, `/api/upload-material`), `public/app.js`
 *   **核心突破**：
-    1. **多文献库管理 (Multi-Document Shelf)**：支持在阅读器中自由切换或并排对比多篇不同的相关文献；
+    1. **多文献库管理 (Multi-Document Shelf) [✅ 基础上传与切换底座已由 PR #1 交付]**：支持在阅读器中自由上传本地 PDF/MD 文献（`POST /api/upload-material`），并通过下拉选择器自由切换，文献与课题会话（`session.activeDoc`）实现解耦隔离；后续进阶双栏并排比对；
     2. **跨文献实证图谱融合 (Cross-Paper Fusion)**：基于 MVP 3.5 的章节大纲经纬度，将来自【论文 A 弱散射章节】与【论文 B 玻恩近似章节】的实证卡片同时连入同一个课题节点，由大模型进行交叉比对（Cross-Examination），自动挖掘理论冲突与学术空白；
     3. **Obsidian 静态知识库与动态 DAG 画布双向水合 (Bidirectional Obsidian Hydration Pipeline)**：
        * **静态笔记 $\to$ 动态 DAG 拓扑反演**：输入任一 Obsidian 概念（如 `[[虚拟内存]]`），后端自动扫描解析其入链与出链依赖，在画布上一键展开为包含前置公理与衍生结论的局部因果子图；
