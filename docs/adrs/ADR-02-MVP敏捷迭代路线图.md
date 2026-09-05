@@ -84,12 +84,21 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     2. **跨文献实证图谱融合 (Cross-Paper Fusion)**：基于 MVP 3.5 的章节大纲经纬度，将来自【论文 A 弱散射章节】与【论文 B 玻恩近似章节】的实证卡片同时连入同一个课题节点，由大模型进行交叉比对（Cross-Examination），自动挖掘理论冲突与学术空白。
 *   **验收标准**：系统能同时容纳多份 PDF 资产，并在单一画布上完成跨文献的有向因果连线与学术异同辨析。
 
-### 阶段 8: MVP 4.5 (数学与物理逆问题仿真求解 / Symbolic & Numeric Engine) —— [规划中]
-*   **主场模块**：`server.py`, `computational_backend/`
+### 阶段 8: MVP 4.5 (数学物理数值仿真与微观系统可执行沙盒 / Symbolic, Numeric & System Tracers) —— [规划中]
+*   **主场模块**：`server.py` (`/api/execute-tracer`), `computational_backend/`, `public/app.js`
 *   **核心升级**：
     1. **符号数学求导 (SymPy Engine)**：针对节点中反编译提取出的 LaTeX 表达式，支持一键在后端调用 SymPy 进行解析求导与泰勒级数展开；
-    2. **物理光场数值离散 (SciPy/NumPy)**：针对基尔霍夫衍射公式等复杂积分，支持一键运行轻量数值仿真，直接在卡片中输出物方与像方光斑对比热力图。
-*   **验收标准**：学术卡片不仅能“讲道理”，还能“算结果”，打通大模型推理与确定性数值仿真的闭环。
+    2. **物理光场数值离散 (SciPy/NumPy)**：针对基尔霍夫衍射公式等复杂积分，支持一键运行轻量数值仿真，直接在卡片中输出物方与像方光斑对比热力图；
+    3. **微观系统状态转移追踪器 (Micro-Architecture & Cache State Tracers / Explorable Sandbox)**：
+       * **终结纯文本硬件陈述**：打破大模型仅输出静态 Markdown 解释的低效局限，基于 Bret Victor 的“可探索解释 (Explorable Explanations)”范式，支持节点生成并原地运行轻量级、确定性的 Python/JS 状态机追踪器；
+       * **流水线周期演进追踪器 (Y86-64 Pipeline Tracer)**：针对处理器体系结构（如 CS:APP 第 4 章），支持在卡片中单步运行 5 级流水线时序模拟，逐周期动态打印：
+         `[Cycle 1] Fetch: 0x4000 | Decode: NOP | Exec: NOP | Hazard: Stall`
+         自动展示数据转发（Forwarding）路径、分支预测错误与气泡（Bubble）插入过程，将人类大脑从“在脑中模拟 5 级寄存器变化的低效虚拟机”中彻底解放，专注于高层时序权衡（Trade-offs）；
+       * **Cache 组相联状态转移追踪器 (Cache Associativity Simulator)**：针对存储器层次结构（如 CS:APP 第 6 章），动态切分物理地址位段（Tag / Set Index / Block Offset），单步追踪内存访问流的 Hit / Cold Miss / Conflict Miss 及 LRU 淘汰链；支持用户在卡片内微调相联度 $E$ 和块大小 $B$，毫秒级重绘冲突颠簸状态；
+       * **反事实假设检验 (What-if Counterfactuals)**：支持用户在节点内直接修改微架构控制信号或硬件参数，即时对比时序差分（State Diff），实现“零脑力内耗、秒级感知硬件物理边界”。
+*   **验收标准**：
+    1. 学术卡片不仅能“讲道理”，还能“算结果”，打通大模型推理与确定性数值仿真的闭环；
+    2. 在画布上点击“运行微架构追踪”，卡片能在 0.1 秒内输出周期级的五级流水线时序图或 Cache 状态转移对账表；修改参数（如 $E=1 \to E=2$）后，冲突判定与时序波形毫秒级实时重绘。
 
 ### 阶段 9: MVP 5.0 (全自动化科研综述导出与离线私有沙盒 / Synthesizer & Privacy Sandbox) —— [终极目标]
 *   **主场模块**：`exporter/latex_generator.py`, `local_engine/`
