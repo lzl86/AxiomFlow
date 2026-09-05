@@ -1,4 +1,5 @@
 import { partitionContext, compilePrompt } from './context_compiler.js';
+import { calculateSugiyamaLayout } from './sugiyama_layout.js';
 
 // 全局数据状态
 let graph = { nodes: [], edges: [] };
@@ -37,6 +38,7 @@ const settingsModal = document.getElementById('settings-modal');
 
 // 初始化
 async function init() {
+  initTheme();
   await loadConfig();
   await loadSessions();
   await loadGraph();
@@ -46,7 +48,37 @@ async function init() {
   renderNodes();
   requestAnimationFrame(() => renderEdges());
   startVersionPolling();
-  loadSamplePaper();
+  await initDocumentSystem();
+}
+
+// ==========================================
+// 主题管理 (浅色 / 深色模式及本地持久化)
+// ==========================================
+function initTheme() {
+  const savedTheme = localStorage.getItem('axiomflow_theme') || 'dark';
+  applyTheme(savedTheme);
+
+  const btnToggleTheme = document.getElementById('btn-toggle-theme');
+  if (btnToggleTheme) {
+    btnToggleTheme.onclick = () => {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      const nextTheme = current === 'light' ? 'dark' : 'light';
+      applyTheme(nextTheme);
+    };
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('axiomflow_theme', theme);
+  const themeIcon = document.getElementById('theme-icon');
+  const btnToggleTheme = document.getElementById('btn-toggle-theme');
+  if (themeIcon) {
+    themeIcon.innerText = theme === 'light' ? '🌙' : '☀️';
+  }
+  if (btnToggleTheme) {
+    btnToggleTheme.title = theme === 'light' ? '切换为深色模式' : '切换为浅色模式';
+  }
 }
 
 // 加载配置
@@ -213,7 +245,7 @@ function createNodeElement(node) {
            ${node.ocrStatus === 'failed' ? `<div style="font-size: 11px; color: #f87171; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; background: rgba(239, 68, 68, 0.1); padding: 3px 6px; border-radius: 4px; border: 1px dashed rgba(239, 68, 68, 0.4);"><span>⚠️ 反编译未完成</span><button onclick="retryOcrFormula('${node.id}', event)" class="btn" style="padding: 1px 6px; font-size: 10px; background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5);">重新解析</button></div>` : ''}
            <blockquote>${renderMarkdown(node.excerpt || node.content || '')}</blockquote>
            ${node.citation ? `<div class="citation-chip">📖 ${escapeHtml(node.citation)}</div>` : ''}`
-        : `<div class="card-question-text" style="font-weight: 600; color: #f8fafc; line-height: 1.45; cursor: text;" title="点击可直接在右侧面板编辑问题">${renderMarkdown(node.question || '<em>(点击在此输入具体科研问题...)</em>')}</div>
+        : `<div class="card-question-text" style="font-weight: 600; color: var(--text-primary); line-height: 1.45; cursor: text;" title="点击可直接在右侧面板编辑问题">${renderMarkdown(node.question || '<em>(点击在此输入具体科研问题...)</em>')}</div>
            <div class="markdown-body" style="margin-top: 8px;">${isGenerating ? '<span style="color: #38bdf8;">🧠 大模型正在深度严密推演中...</span>' : renderMarkdown(node.response || '(点击右侧请求生成)')}</div>`
       }
     </div>
@@ -376,7 +408,7 @@ function updateContextInspector() {
 
   container.innerHTML = `
     <!-- 节点即时输入/编辑区 -->
-    <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(99, 102, 241, 0.35); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);">
+    <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
         <span style="font-size: 11px; font-weight: 700; color: #818cf8; text-transform: uppercase;">✏️ 课题即时编辑</span>
         <span style="font-size: 11px; color: #64748b; font-family: monospace;">ID: <code>${node.id}</code></span>
@@ -437,14 +469,14 @@ function updateContextInspector() {
       ` : ''}
     </div>
 
-    <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; font-size: 11.5px; line-height: 1.45;">
+    <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; font-size: 11.5px; line-height: 1.45; color: var(--text-primary);">
       <span style="color: #38bdf8; font-weight: 600;">⚡ 物理级拓扑隔离：</span>
       仅连入的有效祖先进入 Prompt，剪断分支在 HTTP 请求中被 100% 物理剥离。
     </div>
 
     <!-- 精准 Prompt 折叠查看区（小巧精悍，不挤占界面） -->
-    <details open style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px;">
-      <summary style="font-size: 12px; font-weight: 600; color: #cbd5e1; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+    <details open style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px;">
+      <summary style="font-size: 12px; font-weight: 600; color: var(--text-secondary); cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
         <span>🔍 接收的精准 Prompt 预估 (<span id="prompt-token-count">${compiled.estimatedTokens} tokens</span>)</span>
         <button id="btn-copy-prompt" class="btn" style="padding: 2px 8px; font-size: 10.5px;">复制纯净输入</button>
       </summary>
@@ -756,23 +788,40 @@ async function submitConceptInquiry() {
   }
 }
 
-// 抽屉展开 (进入文献阅读器时默认直接铺满 50% 半屏)
+// 抽屉展开与选项卡切换 (保持上次阅读位置)
+let lastSavedPdfScrollTop = 0;
+
 function openDrawer(tab) {
+  // 1. 若当前在阅读器中，先记住物理滚动位置
+  const pdfViewContainer = document.getElementById('pdf-view-container');
+  if (pdfViewContainer && currentDocMode === 'pdf' && pdfViewContainer.scrollTop > 0) {
+    lastSavedPdfScrollTop = pdfViewContainer.scrollTop;
+  }
+
   activeTab = tab;
   drawer.classList.add('open');
   if (tab === 'reader') {
-    drawer.style.width = '50vw';
+    if (!drawer.style.width || drawer.style.width === '420px') {
+      drawer.style.width = '50vw';
+    }
     const btnHalf = document.getElementById('btn-drawer-half');
     const btnCompact = document.getElementById('btn-drawer-compact');
     const btnWide = document.getElementById('btn-drawer-wide');
     if (btnHalf) btnHalf.classList.add('active');
     if (btnCompact) btnCompact.classList.remove('active');
     if (btnWide) btnWide.classList.remove('active');
+    
+    // 切换进入文献阅读器时，无损恢复之前停留的精确滚动位置
     setTimeout(() => {
-      if (currentDocMode === 'pdf' && currentPdfDoc) {
-        buildContinuousScrollLayout().then(() => scrollToPage(currentPdfPageNum, false));
+      if (currentDocMode === 'pdf' && currentPdfDoc && pdfViewContainer) {
+        const targetScroll = lastSavedPdfScrollTop || (graph.activeDoc ? graph.activeDoc.scrollTop : 0);
+        if (targetScroll > 0) {
+          pdfViewContainer.scrollTop = targetScroll;
+        } else if (currentPdfPageNum > 1) {
+          scrollToPage(currentPdfPageNum, false);
+        }
       }
-    }, 180);
+    }, 50);
   }
   document.querySelectorAll('.drawer-tab').forEach(el => {
     el.classList.toggle('active', el.dataset.tab === tab);
@@ -782,43 +831,43 @@ function openDrawer(tab) {
 }
 
 // ==========================================
-// 文献阅读器与双模阅读引擎 (PDF.js + Markdown)
+// 文献阅读器与文献资产解耦引擎 (PDF.js + Markdown)
 // ==========================================
 
 let currentDocMode = 'markdown'; // 'markdown' | 'pdf'
 let currentPdfDoc = null;
 let currentPdfPageNum = 1;
 let currentPdfScale = 1.15;
-let isRenderingPdfPage = false;
-let currentDocTitle = '文献原文：Lost in the Middle';
+let currentDocTitle = '文献原文';
+let currentPdfUserScale = null; // null 表示自动满宽自适应 (Fit-Width)
+let pdfSlotsMap = new Map();
+let pdfPageObserver = null;
+let pdfVisibilityObserver = null;
+let materialsCatalog = [];
+let isRestoringBreakpoint = false;
+let breakpointSaveTimer = null;
 
-async function loadSamplePaper() {
-  const container = document.getElementById('paper-content');
-  const titleEl = document.getElementById('paper-title');
-  const fileInput = document.getElementById('input-upload-file');
-  const readerPanel = document.getElementById('reader-panel');
-  const btnQuickThesis = document.getElementById('btn-quick-open-thesis');
-
-  // 配置 PDF.js Worker
+// 初始化文献系统
+async function initDocumentSystem() {
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdfjs/pdf.worker.min.js';
   }
 
-  // 默认加载示例论文
-  try {
-    const res = await fetch('/materials/sample_paper.md');
-    const text = await res.text();
-    switchDocMode('markdown');
-    container.innerHTML = renderMarkdown(text);
-  } catch (e) {
-    container.innerText = "暂无文献，请点击上方【📂 上传文献】或直接拖拽本地文件至此处。";
-  }
+  setupPdfControls();
+  setupDrawerResizer();
+  setupPdfSnipper();
 
   // 划词摘录监听 (Markdown 模式)
-  container.onmouseup = () => {
-    if (currentDocMode !== 'markdown') return;
-    handleSelectionToolbar('paper-content', currentDocTitle);
-  };
+  const mdContainer = document.getElementById('paper-content');
+  if (mdContainer) {
+    mdContainer.onmouseup = () => {
+      if (currentDocMode !== 'markdown') return;
+      handleSelectionToolbar('paper-content', currentDocTitle);
+    };
+    mdContainer.onscroll = () => {
+      saveReadingBreakpoint();
+    };
+  }
 
   // PDF 划词摘录监听
   const pdfViewContainer = document.getElementById('pdf-view-container');
@@ -842,32 +891,18 @@ async function loadSamplePaper() {
     }
   }
 
-  // PDF 翻页与缩放控制绑定
-  setupPdfControls();
-  setupDrawerResizer();
-  setupPdfSnipper();
-
-  // 一键打开王京凡博士论文原版 PDF
-  if (btnQuickThesis) {
-    btnQuickThesis.onclick = () => {
-      openDrawer('reader');
-      loadPdfDocument(
-        '/materials/王京凡-博士学位论文-差分相衬显微成像中照明调制方法及应用研究.pdf',
-        '《差分相衬显微成像中照明调制方法及应用研究》'
-      );
-    };
-  }
-
   // 本地文件上传与解析
+  const fileInput = document.getElementById('input-upload-file');
   if (fileInput) {
     fileInput.onchange = (e) => {
       if (e.target.files && e.target.files[0]) {
-        handleFile(e.target.files[0]);
+        handleUploadMaterialFile(e.target.files[0]);
       }
     };
   }
 
   // 支持拖拽文件到阅读面板
+  const readerPanel = document.getElementById('reader-panel');
   if (readerPanel) {
     readerPanel.ondragover = (e) => {
       e.preventDefault();
@@ -881,87 +916,404 @@ async function loadSamplePaper() {
       e.preventDefault();
       readerPanel.style.outline = 'none';
       if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
-        handleFile(e.dataTransfer.files[0]);
+        handleUploadMaterialFile(e.dataTransfer.files[0]);
       }
     };
   }
 
-  async function handleFile(file) {
-    if (!file) return;
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    if (isPdf) {
-      const buffer = await file.arrayBuffer();
-      loadPdfDocument(new Uint8Array(buffer), file.name);
+  // 文献下拉切换监听
+  const docSelector = document.getElementById('doc-selector');
+  if (docSelector) {
+    docSelector.onchange = async () => {
+      const selectedOpt = docSelector.selectedOptions[0];
+      if (!selectedOpt || !selectedOpt.value) return;
+      const url = selectedOpt.value;
+      const type = selectedOpt.dataset.type || (url.toLowerCase().endsWith('.pdf') ? 'pdf' : 'markdown');
+      const name = selectedOpt.dataset.name || selectedOpt.innerText;
+      const title = selectedOpt.dataset.title || name;
+      await switchActiveDocument({ url, type, name, title }, true);
+    };
+  }
+
+  await loadMaterialsCatalog();
+  await restoreSessionActiveDoc();
+}
+
+// 获取文献库资产列表
+async function loadMaterialsCatalog() {
+  try {
+    const res = await fetch('/api/materials');
+    const data = await res.json();
+    materialsCatalog = data.materials || [];
+    renderDocSelectorOptions();
+  } catch (e) {
+    console.warn("获取文献列表异常:", e);
+  }
+}
+
+function renderDocSelectorOptions() {
+  const selector = document.getElementById('doc-selector');
+  if (!selector) return;
+  selector.innerHTML = '';
+
+  if (materialsCatalog.length === 0) {
+    selector.innerHTML = '<option value="">(资产库暂无文献)</option>';
+    return;
+  }
+
+  const activeUrl = graph.activeDoc ? graph.activeDoc.url : '';
+  materialsCatalog.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.url;
+    opt.dataset.type = m.type;
+    opt.dataset.name = m.name;
+    opt.dataset.title = m.title;
+    const icon = m.type === 'pdf' ? '📄' : '📝';
+    opt.innerText = `${icon} ${m.name}`;
+    if (activeUrl && (activeUrl === m.url || activeUrl.endsWith(encodeURIComponent(m.name)) || activeUrl.endsWith(m.name))) {
+      opt.selected = true;
+    }
+    selector.appendChild(opt);
+  });
+}
+
+// 切换当前活跃文献资产
+async function switchActiveDocument(docInfo, resetProgress = false) {
+  if (!docInfo || !docInfo.url) return;
+
+  if (!graph.activeDoc) graph.activeDoc = {};
+  graph.activeDoc.url = docInfo.url;
+  graph.activeDoc.type = docInfo.type || (docInfo.url.toLowerCase().endsWith('.pdf') ? 'pdf' : 'markdown');
+  graph.activeDoc.name = docInfo.name || docInfo.title;
+  graph.activeDoc.title = docInfo.title || docInfo.name;
+
+  if (resetProgress) {
+    graph.activeDoc.currentPage = 1;
+    graph.activeDoc.scrollTop = 0;
+  }
+
+  debouncedSave();
+  renderDocSelectorOptions();
+
+  if (graph.activeDoc.type === 'pdf') {
+    await loadPdfDocument(graph.activeDoc.url, graph.activeDoc.title, graph.activeDoc);
+  } else {
+    await loadMarkdownDocument(graph.activeDoc.url, graph.activeDoc.title, graph.activeDoc);
+  }
+}
+
+// 恢复当前课题绑定的文献资产与断点
+async function restoreSessionActiveDoc() {
+  const activeDoc = graph.activeDoc;
+  if (activeDoc && activeDoc.url) {
+    renderDocSelectorOptions();
+    if (activeDoc.type === 'pdf') {
+      await loadPdfDocument(activeDoc.url, activeDoc.title || activeDoc.name, activeDoc);
     } else {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const text = e.target.result;
-        switchDocMode('markdown');
-        currentDocTitle = file.name;
-        if (titleEl) titleEl.innerText = `文献：${file.name}`;
-        container.innerHTML = renderMarkdown(text);
-        updateStatus(`已成功载入本地文件: ${file.name}`);
-      };
-      reader.readAsText(file, 'utf-8');
+      await loadMarkdownDocument(activeDoc.url, activeDoc.title || activeDoc.name, activeDoc);
+    }
+  } else {
+    // 寻找默认示例文献或首个文献
+    const defaultItem = materialsCatalog.find(m => m.name.includes('王京凡') || m.type === 'pdf') || materialsCatalog[0];
+    if (defaultItem) {
+      await switchActiveDocument(defaultItem, false);
+    } else {
+      await loadMarkdownDocument('/materials/sample_paper.md', '文献原文：Lost in the Middle');
     }
   }
+}
+
+// 处理本地文献文件上传
+async function handleUploadMaterialFile(file) {
+  if (!file) return;
+  try {
+    updateStatus(`正在上传文献【${file.name}】...`);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64Data = e.target.result.split(',')[1];
+      const res = await fetch('/api/upload-material', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          contentBase64: base64Data
+        })
+      });
+      const data = await res.json();
+      if (data.ok && data.material) {
+        await loadMaterialsCatalog();
+        await switchActiveDocument(data.material, true);
+        openDrawer('reader');
+        updateStatus(`✅ 文献【${data.material.name}】已成功上传并绑定至当前课题！`);
+      } else {
+        alert("上传文献失败: " + (data.error || "未知错误"));
+      }
+    };
+    reader.readAsDataURL(file);
+  } catch (e) {
+    console.error("上传文献异常:", e);
+    alert("上传异常: " + e.message);
+  }
+}
+
+// 保存阅读断点状态（防抖无感写入图谱元数据）
+function saveReadingBreakpoint() {
+  if (isRestoringBreakpoint || !graph) return;
+  clearTimeout(breakpointSaveTimer);
+  breakpointSaveTimer = setTimeout(() => {
+    if (!graph.activeDoc) graph.activeDoc = {};
+    const viewContainer = document.getElementById('pdf-view-container');
+    const mdContainer = document.getElementById('paper-content');
+
+    if (currentDocMode === 'pdf' && viewContainer) {
+      graph.activeDoc.currentPage = currentPdfPageNum;
+      graph.activeDoc.scrollTop = viewContainer.scrollTop;
+      graph.activeDoc.userScale = currentPdfUserScale;
+    } else if (mdContainer) {
+      graph.activeDoc.scrollTop = mdContainer.scrollTop;
+    }
+    graph.activeDoc.drawerWidth = drawer.style.width;
+    debouncedSave();
+  }, 300);
 }
 
 function switchDocMode(mode) {
   currentDocMode = mode;
   const mdContainer = document.getElementById('paper-content');
-  const pdfContainer = document.getElementById('pdf-view-container');
+  const pdfWrapper = document.getElementById('pdf-view-wrapper');
   const pdfToolbar = document.getElementById('pdf-toolbar');
 
   if (mode === 'pdf') {
     if (mdContainer) mdContainer.style.display = 'none';
-    if (pdfContainer) pdfContainer.style.display = 'flex';
+    if (pdfWrapper) pdfWrapper.style.display = 'flex';
     if (pdfToolbar) pdfToolbar.style.display = 'flex';
   } else {
     if (mdContainer) mdContainer.style.display = 'block';
-    if (pdfContainer) pdfContainer.style.display = 'none';
+    if (pdfWrapper) pdfWrapper.style.display = 'none';
     if (pdfToolbar) pdfToolbar.style.display = 'none';
   }
 }
 
-let currentPdfUserScale = null; // null 表示自动满宽自适应 (Fit-Width)
-let pdfSlotsMap = new Map();
-let pdfPageObserver = null;
-let pdfVisibilityObserver = null;
+async function loadMarkdownDocument(url, docTitle, savedState = null) {
+  const container = document.getElementById('paper-content');
+  try {
+    switchDocMode('markdown');
+    currentDocTitle = docTitle;
+    const res = await fetch(url);
+    const text = await res.text();
+    container.innerHTML = renderMarkdown(text);
+    if (savedState && savedState.scrollTop) {
+      container.scrollTop = savedState.scrollTop;
+    }
+    updateStatus(`已载入文献: ${docTitle}`);
+  } catch (e) {
+    container.innerText = "暂无文献内容，请上传文献或从下拉菜单选择文档。";
+  }
+}
 
-async function loadPdfDocument(source, docTitle) {
+let currentPdfOutline = [];
+
+async function loadPdfDocument(source, docTitle, savedState = null) {
   if (!window.pdfjsLib) {
     alert("PDF 渲染引擎组件正在准备中，请刷新页面重试。");
     return;
   }
 
   try {
-    updateStatus(`正在载入原版 PDF: ${docTitle} ...`);
+    updateStatus(`正在载入文献 PDF: ${docTitle} ...`);
     switchDocMode('pdf');
     currentDocTitle = docTitle;
-    const titleEl = document.getElementById('paper-title');
-    if (titleEl) titleEl.innerText = `PDF：${docTitle}`;
+
+    if (savedState && savedState.userScale) {
+      currentPdfUserScale = savedState.userScale;
+    }
+    if (savedState && savedState.drawerWidth) {
+      drawer.style.width = savedState.drawerWidth;
+    }
 
     const loadingTask = window.pdfjsLib.getDocument(source);
     currentPdfDoc = await loadingTask.promise;
-    currentPdfPageNum = 1;
+    
+    const targetPage = (savedState && savedState.currentPage) ? savedState.currentPage : 1;
+    currentPdfPageNum = targetPage;
 
     const countEl = document.getElementById('pdf-page-count');
     if (countEl) countEl.innerText = currentPdfDoc.numPages;
 
     const pageInput = document.getElementById('pdf-page-input');
     if (pageInput) {
-      pageInput.value = 1;
+      pageInput.value = targetPage;
       pageInput.max = currentPdfDoc.numPages;
     }
 
     await buildContinuousScrollLayout();
-    updateStatus(`PDF 已成功载入，共 ${currentPdfDoc.numPages} 页，支持滚轮顺滑连续阅读！`);
+
+    // 毫秒级无损复原断点滚动位置
+    if (savedState && (savedState.scrollTop || savedState.currentPage > 1)) {
+      isRestoringBreakpoint = true;
+      const viewContainer = document.getElementById('pdf-view-container');
+      if (savedState.scrollTop && viewContainer) {
+        viewContainer.scrollTop = savedState.scrollTop;
+      } else {
+        scrollToPage(targetPage, false);
+      }
+      setTimeout(() => { isRestoringBreakpoint = false; }, 350);
+    }
+
+    // 异步加载并解析 PDF 章节目录大纲
+    loadPdfOutline(currentPdfDoc);
+
+    updateStatus(`PDF 已成功载入，共 ${currentPdfDoc.numPages} 页（已恢复至上次阅读位置）`);
   } catch (err) {
     console.error("载入 PDF 失败:", err);
-    alert("载入 PDF 失败: " + err.message);
+    updateStatus(`载入 PDF 异常: ${err.message}`);
   }
 }
+
+// 解析并渲染 PDF 章节大纲树
+async function loadPdfOutline(doc) {
+  const treeContainer = document.getElementById('pdf-outline-tree');
+  if (!treeContainer) return;
+  treeContainer.innerHTML = '<div style="color: #64748b; padding: 12px; text-align: center;">正在解析章节大纲...</div>';
+
+  try {
+    const rawOutline = await doc.getOutline();
+    if (!rawOutline || rawOutline.length === 0) {
+      renderFallbackOutline(doc.numPages);
+      return;
+    }
+
+    currentPdfOutline = await resolveOutlineDestinations(doc, rawOutline);
+    renderOutlineTree(currentPdfOutline);
+  } catch (err) {
+    console.warn("解析 PDF 目录大纲失败:", err);
+    renderFallbackOutline(doc.numPages);
+  }
+}
+
+async function resolveOutlineDestinations(doc, items) {
+  const result = [];
+  for (const item of items) {
+    let targetPage = null;
+    try {
+      let dest = item.dest;
+      if (typeof dest === 'string') {
+        dest = await doc.getDestination(dest);
+      }
+      if (Array.isArray(dest) && dest[0]) {
+        const pageIndex = await doc.getPageIndex(dest[0]);
+        targetPage = pageIndex + 1;
+      }
+    } catch (e) {
+      // 容错忽略目标页解析异常
+    }
+
+    let subItems = [];
+    if (item.items && item.items.length > 0) {
+      subItems = await resolveOutlineDestinations(doc, item.items);
+    }
+
+    result.push({
+      title: item.title ? item.title.trim() : '未命名章节',
+      pageNum: targetPage,
+      items: subItems
+    });
+  }
+  return result;
+}
+
+function renderOutlineTree(outlineItems) {
+  const treeContainer = document.getElementById('pdf-outline-tree');
+  if (!treeContainer) return;
+  treeContainer.innerHTML = '';
+
+  if (!outlineItems || outlineItems.length === 0) {
+    treeContainer.innerHTML = '<div style="color: #64748b; padding: 12px; text-align: center;">该文献未包含书签目录</div>';
+    return;
+  }
+
+  function createOutlineNode(item) {
+    const wrap = document.createElement('div');
+    wrap.className = 'outline-node-wrapper';
+
+    const row = document.createElement('div');
+    row.className = 'outline-item';
+    if (item.pageNum === currentPdfPageNum) row.classList.add('active');
+    row.dataset.page = item.pageNum || '';
+
+    row.innerHTML = `
+      <span class="outline-item-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span>
+      ${item.pageNum ? `<span class="outline-page-badge">P.${item.pageNum}</span>` : ''}
+    `;
+
+    row.onclick = (e) => {
+      e.stopPropagation();
+      if (item.pageNum) {
+        jumpToOutlinePage(item.pageNum);
+        document.querySelectorAll('.outline-item').forEach(el => el.classList.remove('active'));
+        row.classList.add('active');
+      }
+    };
+
+    wrap.appendChild(row);
+
+    if (item.items && item.items.length > 0) {
+      const subWrap = document.createElement('div');
+      subWrap.className = 'outline-subitems';
+      item.items.forEach(sub => {
+        subWrap.appendChild(createOutlineNode(sub));
+      });
+      wrap.appendChild(subWrap);
+    }
+
+    return wrap;
+  }
+
+  const frag = document.createDocumentFragment();
+  outlineItems.forEach(item => {
+    frag.appendChild(createOutlineNode(item));
+  });
+  treeContainer.appendChild(frag);
+}
+
+function renderFallbackOutline(numPages) {
+  const treeContainer = document.getElementById('pdf-outline-tree');
+  if (!treeContainer) return;
+  treeContainer.innerHTML = `
+    <div style="padding: 10px 8px; color: #94a3b8; font-size: 11.5px; line-height: 1.5;">
+      <p style="margin-bottom: 8px; color: #cbd5e1;">⚠️ 该 PDF 未内置书签大纲，可通过以下常用分页快速跳转：</p>
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;">
+        ${Array.from({ length: Math.min(10, Math.ceil(numPages / 10)) }, (_, i) => {
+          const p = i === 0 ? 1 : i * 10;
+          return `<button class="btn" style="padding: 3px 6px; font-size: 11px; justify-content: center;" onclick="window.jumpToOutlinePage(${p})">第 ${p} 页</button>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+// 点击目录大纲平滑跳转并光效高亮目标页
+function jumpToOutlinePage(pageNum) {
+  if (!currentPdfDoc) return;
+  scrollToPage(pageNum, true);
+
+  // 光效高亮目标页 1.5 秒
+  setTimeout(() => {
+    const slot = document.getElementById(`pdf-slot-${pageNum}`);
+    if (slot) {
+      slot.classList.add('page-highlight');
+      setTimeout(() => {
+        slot.classList.remove('page-highlight');
+      }, 1500);
+    }
+  }, 200);
+
+  updateStatus(`已定位至文献第 ${pageNum} 页`);
+  saveReadingBreakpoint();
+}
+
+window.jumpToOutlinePage = jumpToOutlinePage;
+
 
 async function buildContinuousScrollLayout() {
   if (!currentPdfDoc) return;
@@ -1190,6 +1542,26 @@ function setupPdfControls() {
       const base = currentPdfUserScale || 1.0;
       currentPdfUserScale = Math.max(base / 1.15, 0.45);
       buildContinuousScrollLayout().then(() => scrollToPage(currentPdfPageNum, false));
+    };
+  }
+
+  // 章节目录面板展开与收起
+  const btnToggleOutline = document.getElementById('btn-toggle-outline');
+  const outlinePanel = document.getElementById('pdf-outline-panel');
+  const btnCloseOutline = document.getElementById('btn-close-outline');
+
+  if (btnToggleOutline && outlinePanel) {
+    btnToggleOutline.onclick = () => {
+      const isVisible = outlinePanel.style.display === 'flex';
+      outlinePanel.style.display = isVisible ? 'none' : 'flex';
+      btnToggleOutline.classList.toggle('active', !isVisible);
+    };
+  }
+
+  if (btnCloseOutline && outlinePanel) {
+    btnCloseOutline.onclick = () => {
+      outlinePanel.style.display = 'none';
+      if (btnToggleOutline) btnToggleOutline.classList.remove('active');
     };
   }
 }
@@ -1706,6 +2078,7 @@ async function switchSession(sessionId) {
       lastMtime = 0;
       await loadGraph();
       await loadSessions();
+      await restoreSessionActiveDoc();
       selectedNodeId = null;
       renderNodes();
       requestAnimationFrame(() => {
@@ -1740,6 +2113,7 @@ async function handleCreateNewSession() {
       lastMtime = 0;
       await loadGraph();
       await loadSessions();
+      await restoreSessionActiveDoc();
       selectedNodeId = null;
       renderNodes();
       requestAnimationFrame(() => renderEdges());
@@ -1939,6 +2313,11 @@ function setupEventListeners() {
   });
 
   // 顶部操作按钮
+  const btnAutoLayout = document.getElementById('btn-auto-layout');
+  if (btnAutoLayout) {
+    btnAutoLayout.onclick = () => applySugiyamaLayout(true);
+  }
+
   document.getElementById('btn-add-question').onclick = () => {
     const newId = `n_q_${Date.now()}`;
     const screenCenter = screenToWorld(window.innerWidth / 3, window.innerHeight / 2.5);
@@ -2055,6 +2434,11 @@ function setupEventListeners() {
   const zoomFitBtn = document.getElementById('btn-zoom-fit');
   if (zoomFitBtn) {
     zoomFitBtn.onclick = () => fitView();
+  }
+
+  const zoomLayoutBtn = document.getElementById('btn-zoom-layout');
+  if (zoomLayoutBtn) {
+    zoomLayoutBtn.onclick = () => applySugiyamaLayout(true);
   }
 
   // 概念追问弹窗控制
@@ -2325,7 +2709,7 @@ function openCardFullscreen(node) {
     bodyEl.innerHTML = `
       <div style="background: rgba(99, 102, 241, 0.08); border-left: 4px solid #6366f1; border-radius: 0 8px 8px 0; padding: 14px 18px; margin-bottom: 20px;">
         <div style="font-size: 11px; font-weight: 600; color: #a5b4fc; text-transform: uppercase; margin-bottom: 6px;">探索课题 / 问题假设 (Question)</div>
-        <div style="font-size: 15px; font-weight: 600; color: #f8fafc; line-height: 1.55;">${renderMarkdown(node.question || '')}</div>
+        <div style="font-size: 15px; font-weight: 600; color: var(--text-primary); line-height: 1.55;">${renderMarkdown(node.question || '')}</div>
       </div>
       <div style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
         <span>大模型严密推演与学术论证 (Response)</span>
@@ -2357,6 +2741,62 @@ function openCardFullscreen(node) {
   };
 
   modal.style.display = 'flex';
+}
+
+// Sugiyama 拓扑自动分层排布（一键理牌与防重叠）
+function applySugiyamaLayout(autoFit = true) {
+  if (!graph.nodes || graph.nodes.length === 0) {
+    updateStatus("当前画布无节点可整理");
+    return;
+  }
+  updateStatus("正在执行 Sugiyama 拓扑自动分层排布...");
+
+  const domHeightsMap = {};
+  graph.nodes.forEach(n => {
+    const el = document.querySelector(`.node[data-id="${n.id}"]`);
+    if (el) {
+      domHeightsMap[n.id] = el.offsetHeight;
+    }
+  });
+
+  const layoutResult = calculateSugiyamaLayout(graph.nodes, graph.edges, {
+    nodeWidth: 360,
+    hGap: 140,
+    vGap: 38,
+    startX: 60,
+    startY: 60,
+    domHeightsMap
+  });
+
+  const positions = layoutResult.positions;
+  graph.nodes.forEach(n => {
+    const pos = positions[n.id];
+    if (pos) {
+      n.x = pos.x;
+      n.y = pos.y;
+      const el = document.querySelector(`.node[data-id="${n.id}"]`);
+      if (el) {
+        el.classList.add('smooth-moving');
+        el.style.left = `${n.x}px`;
+        el.style.top = `${n.y}px`;
+      }
+    }
+  });
+
+  let startAnimTime = performance.now();
+  function animateEdges() {
+    renderEdges();
+    if (performance.now() - startAnimTime < 380) {
+      requestAnimationFrame(animateEdges);
+    } else {
+      document.querySelectorAll('.node.smooth-moving').forEach(el => el.classList.remove('smooth-moving'));
+      renderEdges();
+      saveGraph();
+      if (autoFit) fitView();
+      updateStatus("✨ 拓扑已自动规整为因果分层网络！");
+    }
+  }
+  requestAnimationFrame(animateEdges);
 }
 
 // 自动全景居中适配视口（防右侧抽屉遮挡）
