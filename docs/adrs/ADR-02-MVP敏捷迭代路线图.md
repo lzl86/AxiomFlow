@@ -48,30 +48,37 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
 
 ---
 
-### 阶段 5: MVP 3.0 (工作台工效、阅读连续性与多态代码实证 / Ergonomics & Multi-Modal Grounding) —— [🚀 当前核心目标]
-*   **主场模块**：`public/app.js`, `public/style.css`, `public/index.html`, `server.py`
+### 阶段 5: MVP 3.0 (工作台工效、阅读连续性、多态代码实证与拓扑分层排布 / Ergonomics, Persistence, Auto-Layout & Multi-Modal Grounding) —— [✅ 基础工效已交付，参见 ADR-03；硬件探针进阶中]
+*   **主场模块**：`public/sugiyama_layout.js`, `public/app.js`, `public/style.css`, `public/index.html`, `server.py`
 *   **核心突破**：
-    1. **文献资产解耦与断点记忆持久化 (Document Decoupling & Reading Persistence)**：
-       * **彻底解除论文硬编码**：将前端写死的特定论文名称（如王京凡博士论文）彻底解耦，改造为基于会话元数据（`session.activeDoc`）的动态文献加载机制；原博士论文作为系统预置的“示例文献 (Demo Case)”平滑降级保留；
-       * **会话级自定义文献绑定**：支持用户为不同课题独立上传或从资产目录切换不同的自定义 PDF 论文，实现“一个课题对应一份目标文献资产”的清晰映射；
-       * **视窗状态与断点无损复原**：实时监听物理滚动视口，将所选文献的当前活跃页码 (`currentPage`)、精确像素级滚动偏移 (`scrollTop`)、缩放比例 (`zoomLevel`) 与分屏抽屉宽度无感实时写入持久化存储；用户刷新浏览器、重启本地服务或在不同课题间切换时，文献阅读器毫秒级无损复原至上次离开的位置。
-    2. **DAG 画布拓扑自动分层整理 (Sugiyama Auto-Layout & Anti-Overlap)**：
-       * 引入经典有向无环图分层布局算法（Sugiyama Layout / Topological Rank Sorting），为复杂因果网赋予自适应规整力；
-       * 一键理牌（Auto-Tidy）：自左向右（或自上向下）根据连线的因果流向将节点自动对齐排布为三列阵列：
-         $$\text{左列 [客观文献/代码实证]} \longrightarrow \text{中列 [探索课题与假设]} \longrightarrow \text{右列 [推演结论与衍生追问]}$$
-       * 计算卡片物理边界包围盒（Bounding Box Collision），动态消除卡片层叠挤压，智能平滑连接折线，为后续海量知识节点构建秩序井然的视觉底座。
-    3. **源码与多态公理实证支持 (Source Code & Multi-Modal Grounding Assets)**：
+    1. **文献资产解耦与断点记忆持久化 (Document Decoupling & Reading Persistence) [✅已交付]**：
+       * **彻底解除论文硬编码**：将前端写死的特定论文名称彻底解耦，改造为基于会话元数据（`session.activeDoc`）的动态文献加载机制；支持自由上传 PDF/TXT/MD 等格式；
+       * **会话级自定义文献绑定**：支持用户为不同课题独立上传或从资产目录切换不同的自定义文献资产，实现“一个课题对应一份目标文献资产”的清晰映射；
+       * **视窗状态与断点无损复原 (Zero-Jump Retention)**：抽屉切换与折叠时物理 `scrollTop` 零跳动，离开前记录位置，重新切回时禁止暴力清空 DOM，跨会话毫秒级精确还原阅读进度。
+    2. **DAG 画布拓扑自动分层整理 (Sugiyama Auto-Layout & Anti-Overlap) [✅已交付]**：
+       * 引入经典有向无环图分层布局算法（Sugiyama Layout / Topological Rank Sorting）：基于 Kahn 拓扑排序计算层级，结合重心法（Barycentric Heuristic）最小化连线交叉；
+       * 计算卡片物理包围盒（Bounding Box Collision），动态消除卡片层叠挤压，自左向右沿因果流向舒展排列，并由 `requestAnimationFrame` 驱动 350ms 贝塞尔平滑过渡动画与连线实时重绘。
+    3. **PDF 交互式章节目录大纲与光效聚焦 (Interactive Outline & Halo Jump) [✅已交付]**：
+       * 递归解析 PDF.js 原生大纲书签目录（`doc.getOutline()` 与 `getDestination()`），动态构建章节树形列表；
+       * 点击章节目录，视口以 60FPS 平滑滚动物理对齐目标页，同时为目标页附加 1.5 秒的科技感高亮光晕（Halo Jump）；若文档无内置书签，自动降级生成分页快速跳转向导。
+    4. **全局浅色模式与主题持久化 (Light Mode & Theme Persistence) [✅已交付]**：
+       * 适配日间学术高对比度阅读色彩体系，在 `[data-theme="light"]` 下构建 Slate / Indigo / Emerald 变量，白底卡片搭配深色高清晰度正文，KaTeX 公式黑白锐利分明；
+       * 导航栏提供 `☀️ / 🌙` 一键切换，偏好存储于 `localStorage.axiomflow_theme`，跨页面与重启长效保留。
+    5. **源码与多态公理实证支持与硬件探针 (Source Code & GDB/NEMU Runtime Ingestion) [🚀持续进阶]**：
        * **代码块渲染与指针防转义守卫**：卡片与审查器原生支持标准 Markdown 代码块（如 ` ```c `），注入暗色等宽代码高亮，严格保护 C/C++ 指针星号 `*` 与下划线 `_` 免遭 Markdown 解析器误转为斜体或加粗；
        * **剪贴板极速建卡通道**：支持直接从系统剪贴板一键将代码片段（如操作系统 `eval()` 进程与信号控制流）录入为合法的“源码公理实证节点”；
        * **微观机理推演 Prompt 解绑**：解构泛化学术提示词对微观机理的压制，在面对代码与底层系统调用推演时，自适应释放对并发竞态、内核信号掩码翻转、进程组拓扑等硬核底层微观机制的深度推导能力；
        * **GDB / NEMU 运行时动态调试探针通道 (Runtime GDB/MI & Trace Ingestion)**：通过 `antigravity_bridge.py` 注入轻量 GDB/MI 协议监听器，支持在 Linux 终端单步调试内核、用户程序或 NEMU 仿真器时，敲击自定义指令（如 `dump-to-tree`）一键将崩溃断点的反汇编指令段、16 个通用寄存器状态和栈顶物理内存 Dump 直接挂载为画布上的“真实硬件物理态实证卡片”，彻底终结手工复制终端日志的摩擦。
 *   **验收标准**：
-    1. 在阅读器中可自由上传或切换为任意自定义 PDF，并在该长文中滚动至 P.68；刷新网页后，系统 100% 精确复原该文献并停留在 P.68，页面不产生二次跳动；
-    2. 画布上堆叠有 10+ 乱序摆放甚至重叠的卡片，点击“一键整理拓扑”，0.2 秒内自动舒展为整齐划一的三列因果层级网络；
-    3. 支持将一段 C 语言内核代码（如 CS:APP `eval()`）直接粘贴为实证卡片，卡片内等宽语法高亮正常；挂载课题后，大模型能沿着拓扑祖先准确剖析信号屏蔽时序与进程组隔离机制；
-    4. 终端 GDB 触发断点后，执行命令可将当前寄存器与内存快照在 1 秒内无缝推送至画布生成高亮实证节点。
+    1. 在阅读器中可自由上传或切换为任意自定义 PDF，并在该长文中滚动至 P.68；刷新网页后，系统 100% 精确复原该文献并停留在 P.68，页面零跳动；
+    2. 画布上堆叠有 10+ 乱序摆放甚至重叠的卡片，点击“✨ 自动分层排布”，0.3 秒内自动舒展为整齐划一的因果层级网络；
+    3. 点击“📑 章节目录”展开大纲树，点击小节直接跳至目标页并高亮显示；点击主题按钮平滑切换浅色日间阅读模式；
+    4. 支持将一段 C 语言内核代码（如 CS:APP `eval()`）直接粘贴为实证卡片，卡片内等宽语法高亮正常；挂载课题后，大模型能沿着拓扑祖先准确剖析信号屏蔽时序与进程组隔离机制；
+    5. 终端 GDB 触发断点后，执行命令可将当前寄存器与内存快照在 1 秒内无缝推送至画布生成高亮实证节点。
 
-### 阶段 6: MVP 3.5 (单文献/单工程宏微观分层研读引擎 / Hierarchical Macro-Skeleton & Neighborhood Deep-Dive) —— [顺延规划]
+---
+
+### 阶段 6: MVP 3.5 (单文献/单工程宏微观分层研读引擎 / Hierarchical Macro-Skeleton & Neighborhood Deep-Dive) —— [🚀 进阶演进中]
 *   **主场模块**：`server.py` (`/api/paper-outline`, `/api/paper-neighborhood`), `public/app.js`, `public/index.html`
 *   **核心突破**：
     1. **Stage 1 全局粗读（骨架成树·宏观全景导航）**：利用长上下文大模型快速提炼全文结构化章节（或大型源码文件的函数/类结构骨架 AST Outline Tree），生成带有**物理页码/代码行号强锚点**的可交互【全景大纲树】；

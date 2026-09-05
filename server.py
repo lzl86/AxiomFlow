@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import time
+import base64
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -20,10 +21,13 @@ if sys.platform.startswith("win") and hasattr(sys.stdout, "reconfigure"):
 PORT = 8765
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
+MATERIALS_DIR = PUBLIC_DIR / "materials"
 GRAPH_FILE = BASE_DIR / "graph.json"
 CONFIG_FILE = BASE_DIR / "config.json"
 SESSIONS_DIR = BASE_DIR / "sessions"
 SESSIONS_INDEX_FILE = SESSIONS_DIR / "index.json"
+
+MATERIALS_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_CONFIG = {
     "api_base": "http://127.0.0.1:8046/v1",
@@ -214,6 +218,28 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 }).encode("utf-8"))
             return
 
+        elif parsed.path == "/api/materials":
+            materials_list = []
+            if MATERIALS_DIR.exists():
+                for f in sorted(MATERIALS_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+                    if f.is_file() and not f.name.startswith("."):
+                        ext = f.suffix.lower()
+                        file_type = "pdf" if ext == ".pdf" else ("markdown" if ext in [".md", ".markdown", ".txt"] else "other")
+                        materials_list.append({
+                            "name": f.name,
+                            "title": f.stem,
+                            "url": f"/materials/{urllib.parse.quote(f.name)}",
+                            "type": file_type,
+                            "size": f.stat().st_size,
+                            "mtime": int(f.stat().st_mtime * 1000)
+                        })
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"materials": materials_list}, ensure_ascii=False).encode("utf-8"))
+            return
+
         return super().do_GET()
 
     def do_POST(self):
@@ -221,7 +247,51 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         post_data = self.rfile.read(content_length)
 
-        if parsed.path == "/api/sessions/new":
+        if parsed.path == "/api/upload-material":
+            try:
+                req_data = json.loads(post_data.decode("utf-8"))
+                filename = req_data.get("filename", "").strip()
+                content_base64 = req_data.get("contentBase64", "")
+                if not filename:
+                    raise ValueError("文件名不能为空")
+                
+                safe_name = os.path.basename(filename).replace("/", "").replace("\\", "").replace("..", "")
+                if not safe_name:
+                    safe_name = f"document_{int(time.time())}.pdf"
+                
+                target_path = MATERIALS_DIR / safe_name
+                raw_bytes = base64.b64decode(content_base64)
+                with open(target_path, "wb") as wf:
+                    wf.write(raw_bytes)
+                
+                ext = target_path.suffix.lower()
+                file_type = "pdf" if ext == ".pdf" else ("markdown" if ext in [".md", ".markdown", ".txt"] else "other")
+                
+                res_meta = {
+                    "ok": True,
+                    "material": {
+                        "name": safe_name,
+                        "title": target_path.stem,
+                        "url": f"/materials/{urllib.parse.quote(safe_name)}",
+                        "type": file_type,
+                        "size": len(raw_bytes),
+                        "mtime": int(time.time() * 1000)
+                    }
+                }
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps(res_meta, ensure_ascii=False).encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode("utf-8"))
+            return
+
+        elif parsed.path == "/api/sessions/new":
             try:
                 req = json.loads(post_data.decode("utf-8")) if post_data else {}
                 title = req.get("title", "").strip() or f"新研究课题 #{int(time.time()) % 10000}"
