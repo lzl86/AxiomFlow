@@ -63,11 +63,13 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     3. **源码与多态公理实证支持 (Source Code & Multi-Modal Grounding Assets)**：
        * **代码块渲染与指针防转义守卫**：卡片与审查器原生支持标准 Markdown 代码块（如 ` ```c `），注入暗色等宽代码高亮，严格保护 C/C++ 指针星号 `*` 与下划线 `_` 免遭 Markdown 解析器误转为斜体或加粗；
        * **剪贴板极速建卡通道**：支持直接从系统剪贴板一键将代码片段（如操作系统 `eval()` 进程与信号控制流）录入为合法的“源码公理实证节点”；
-       * **微观机理推演 Prompt 解绑**：解构泛化学术提示词对微观机理的压制，在面对代码与底层系统调用推演时，自适应释放对并发竞态、内核信号掩码翻转、进程组拓扑等硬核底层微观机制的深度推导能力。
+       * **微观机理推演 Prompt 解绑**：解构泛化学术提示词对微观机理的压制，在面对代码与底层系统调用推演时，自适应释放对并发竞态、内核信号掩码翻转、进程组拓扑等硬核底层微观机制的深度推导能力；
+       * **GDB / NEMU 运行时动态调试探针通道 (Runtime GDB/MI & Trace Ingestion)**：通过 `antigravity_bridge.py` 注入轻量 GDB/MI 协议监听器，支持在 Linux 终端单步调试内核、用户程序或 NEMU 仿真器时，敲击自定义指令（如 `dump-to-tree`）一键将崩溃断点的反汇编指令段、16 个通用寄存器状态和栈顶物理内存 Dump 直接挂载为画布上的“真实硬件物理态实证卡片”，彻底终结手工复制终端日志的摩擦。
 *   **验收标准**：
     1. 在阅读器中可自由上传或切换为任意自定义 PDF，并在该长文中滚动至 P.68；刷新网页后，系统 100% 精确复原该文献并停留在 P.68，页面不产生二次跳动；
     2. 画布上堆叠有 10+ 乱序摆放甚至重叠的卡片，点击“一键整理拓扑”，0.2 秒内自动舒展为整齐划一的三列因果层级网络；
-    3. 支持将一段 C 语言内核代码（如 CS:APP `eval()`）直接粘贴为实证卡片，卡片内等宽语法高亮正常；挂载课题后，大模型能沿着拓扑祖先准确剖析信号屏蔽时序与进程组隔离机制。
+    3. 支持将一段 C 语言内核代码（如 CS:APP `eval()`）直接粘贴为实证卡片，卡片内等宽语法高亮正常；挂载课题后，大模型能沿着拓扑祖先准确剖析信号屏蔽时序与进程组隔离机制；
+    4. 终端 GDB 触发断点后，执行命令可将当前寄存器与内存快照在 1 秒内无缝推送至画布生成高亮实证节点。
 
 ### 阶段 6: MVP 3.5 (单文献/单工程宏微观分层研读引擎 / Hierarchical Macro-Skeleton & Neighborhood Deep-Dive) —— [顺延规划]
 *   **主场模块**：`server.py` (`/api/paper-outline`, `/api/paper-neighborhood`), `public/app.js`, `public/index.html`
@@ -77,41 +79,54 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     3. **Stage 3 显微研读（局部无幻觉推演）**：针对该板块发起深度学术探究时，大模型被精准约束在该物理邻域的公式、参数或局部调用链中，彻底解决“全局记不住、局部看不细”的困境。
 *   **验收标准**：可在阅读器侧边一键拉出章节/函数大纲树，点击“2.2 弱物体近似”自动滚动至第 50 页并高亮；对该小节发起追问时，模型仅读取邻域上下文，1~2 秒内精准解答公式细节。
 
-### 阶段 7: MVP 4.0 (多文献跨论文交叉比对 / Cross-Paper Graph & Theory Contradiction) —— [顺延规划]
-*   **主场模块**：`public/materials/`, `server.py`, `public/app.js`
+### 阶段 7: MVP 4.0 (多文献跨论文交叉比对与 Obsidian 双向水合 / Cross-Paper Graph & Knowledge Hydration) —— [顺延规划]
+*   **主场模块**：`public/materials/`, `server.py` (`/api/hydrate`), `public/app.js`
 *   **核心突破**：
     1. **多文献库管理 (Multi-Document Shelf)**：支持在阅读器中自由切换或并排对比多篇不同的相关文献；
-    2. **跨文献实证图谱融合 (Cross-Paper Fusion)**：基于 MVP 3.5 的章节大纲经纬度，将来自【论文 A 弱散射章节】与【论文 B 玻恩近似章节】的实证卡片同时连入同一个课题节点，由大模型进行交叉比对（Cross-Examination），自动挖掘理论冲突与学术空白。
-*   **验收标准**：系统能同时容纳多份 PDF 资产，并在单一画布上完成跨文献的有向因果连线与学术异同辨析。
+    2. **跨文献实证图谱融合 (Cross-Paper Fusion)**：基于 MVP 3.5 的章节大纲经纬度，将来自【论文 A 弱散射章节】与【论文 B 玻恩近似章节】的实证卡片同时连入同一个课题节点，由大模型进行交叉比对（Cross-Examination），自动挖掘理论冲突与学术空白；
+    3. **Obsidian 静态知识库与动态 DAG 画布双向水合 (Bidirectional Obsidian Hydration Pipeline)**：
+       * **静态笔记 $\to$ 动态 DAG 拓扑反演**：输入任一 Obsidian 概念（如 `[[虚拟内存]]`），后端自动扫描解析其入链与出链依赖，在画布上一键展开为包含前置公理与衍生结论的局部因果子图；
+       * **动态推演 $\to$ 结构化笔记结晶**：画布探究完成后，支持将当前有效祖先推演链路一键结晶导出为符合 Obsidian 规范、携带标准 Wikilinks 与学术锚点的复盘 Markdown 笔记，实现知识资产沉淀闭环。
+*   **验收标准**：
+    1. 系统能同时容纳多份 PDF 资产，并在单一画布上完成跨文献的有向因果连线与学术异同辨析；
+    2. 输入本地 Obsidian 笔记路径后，可在 0.5 秒内将其概念网水合展开为可视化的 DAG 推演分支；推演完毕可一键回写生成新笔记。
 
-### 阶段 8: MVP 4.5 (数学物理数值仿真与微观系统可执行沙盒 / Symbolic, Numeric & System Tracers) —— [规划中]
-*   **主场模块**：`server.py` (`/api/execute-tracer`), `computational_backend/`, `public/app.js`
+### 阶段 8: MVP 4.5 (数学物理数值仿真、形式化求解与微观系统原生沙盒 / Symbolic, Numeric, Formal & System Tracers) —— [规划中]
+*   **主场模块**：`server.py` (`/api/execute-tracer`, `/api/z3-solve`), `computational_backend/`, `public/app.js`
 *   **核心升级**：
     1. **符号数学求导 (SymPy Engine)**：针对节点中反编译提取出的 LaTeX 表达式，支持一键在后端调用 SymPy 进行解析求导与泰勒级数展开；
     2. **物理光场数值离散 (SciPy/NumPy)**：针对基尔霍夫衍射公式等复杂积分，支持一键运行轻量数值仿真，直接在卡片中输出物方与像方光斑对比热力图；
     3. **微观系统状态转移追踪器 (Micro-Architecture & Cache State Tracers / Explorable Sandbox)**：
-       * **终结纯文本硬件陈述**：打破大模型仅输出静态 Markdown 解释的低效局限，基于 Bret Victor 的“可探索解释 (Explorable Explanations)”范式，支持节点生成并原地运行轻量级、确定性的 Python/JS 状态机追踪器；
+       * **原生零构建可交互微部件 (Zero-Build DOM/SVG Explorable Widgets)**：贯彻 Bret Victor 的“可探索解释 (Explorable Explanations)”范式，彻底终结静态文本，支持节点生成并原地运行轻量级、确定性的 Python/JS 状态机追踪器，支持双手直接在卡片内拖动参数滑块进行微观硬件推演；
        * **流水线周期演进追踪器 (Y86-64 Pipeline Tracer)**：针对处理器体系结构（如 CS:APP 第 4 章），支持在卡片中单步运行 5 级流水线时序模拟，逐周期动态打印：
          `[Cycle 1] Fetch: 0x4000 | Decode: NOP | Exec: NOP | Hazard: Stall`
          自动展示数据转发（Forwarding）路径、分支预测错误与气泡（Bubble）插入过程，将人类大脑从“在脑中模拟 5 级寄存器变化的低效虚拟机”中彻底解放，专注于高层时序权衡（Trade-offs）；
        * **Cache 组相联状态转移追踪器 (Cache Associativity Simulator)**：针对存储器层次结构（如 CS:APP 第 6 章），动态切分物理地址位段（Tag / Set Index / Block Offset），单步追踪内存访问流的 Hit / Cold Miss / Conflict Miss 及 LRU 淘汰链；支持用户在卡片内微调相联度 $E$ 和块大小 $B$，毫秒级重绘冲突颠簸状态；
-       * **反事实假设检验 (What-if Counterfactuals)**：支持用户在节点内直接修改微架构控制信号或硬件参数，即时对比时序差分（State Diff），实现“零脑力内耗、秒级感知硬件物理边界”。
+       * **反事实假设检验 (What-if Counterfactuals)**：支持用户在节点内直接修改微架构控制信号或硬件参数，即时对比时序差分（State Diff），实现“零脑力内耗、秒级感知硬件物理边界”；
+    4. **SMT / Z3 形式化不变量约束求解探针 (Formal Invariant & Z3 Prover Engine)**：
+       * 后端集成 Z3 求解器，专门针对底层位级算法（如 Data Lab 的 `bitAnd`, `howManyBits`）与状态机互斥不变量；
+       * 支持在 100 毫秒内对用户实现与标准形式化规格进行全空间（$2^{32}$）数学等价性证明；若存在逻辑缺陷，直接反向求解并输出全空间唯一的“最小破坏性反例输入（Minimal Failing Counterexample）”，彻底取代低效盲目的人肉穷举测试。
 *   **验收标准**：
     1. 学术卡片不仅能“讲道理”，还能“算结果”，打通大模型推理与确定性数值仿真的闭环；
-    2. 在画布上点击“运行微架构追踪”，卡片能在 0.1 秒内输出周期级的五级流水线时序图或 Cache 状态转移对账表；修改参数（如 $E=1 \to E=2$）后，冲突判定与时序波形毫秒级实时重绘。
+    2. 在画布上点击“运行微架构追踪”，卡片能在 0.1 秒内输出周期级的五级流水线时序图或 Cache 状态转移对账表；修改参数（如 $E=1 \to E=2$）后，冲突判定与时序波形毫秒级实时重绘；
+    3. 针对任意位运算函数，点击“Z3 形式化验证”，能在 0.2 秒内输出严格数学证明或定位到导致溢出的具体 32 位十六进制反例值。
 
-### 阶段 9: MVP 5.0 (全自动化科研综述导出与离线私有沙盒 / Synthesizer & Privacy Sandbox) —— [终极目标]
-*   **主场模块**：`exporter/latex_generator.py`, `local_engine/`
+### 阶段 9: MVP 5.0 (全自动化科研综述导出、拓扑间隔复习与离线私有沙盒 / Synthesizer, Topological Spaced-Repetition & Privacy Sandbox) —— [终极目标]
+*   **主场模块**：`exporter/latex_generator.py`, `local_engine/`, `public/app.js` (`review_mode`)
 *   **核心升级**：
     1. **拓扑排序综述一键成稿**：根据因果图拓扑排序，一键生成 Overleaf / IEEE 格式的标准学术论文初稿 LaTeX 压缩包；
-    2. **100% 纯本地开源视觉模型沙盒**：对接 Ollama/vLLM (InternVL2 / Qwen2-VL)，实现零外网调用的局域网物理保密推演。
-*   **验收标准**：离线模式下一键点击“导出学术报告”，3 秒内生成排版完备的单篇学术报告 PDF/LaTeX。
+    2. **基于 DAG 机制有向边的拓扑间隔复习引擎 (Topological Edge-FSRS Spaced Repetition)**：
+       * 颠覆传统 Anki 针对孤立事实卡片的浅层死记硬背模型，将复习单元从“单点卡片”升维至“因果有向边（Causal Edges）”；
+       * 系统定期对画布因果链发起主动遮蔽探问（例如隐去直接映射 Cache 到消除冲突之间的关键推演边），逼迫大脑提取底层的微观硬件机制与物理转移条件，形成网络状抗遗忘骨架；
+    3. **100% 纯本地开源视觉模型沙盒**：对接 Ollama/vLLM (InternVL2 / Qwen2-VL)，实现零外网调用的局域网物理保密推演。
+*   **验收标准**：
+    1. 离线模式下一键点击“导出学术报告”，3 秒内生成排版完备的单篇学术报告 PDF/LaTeX；
+    2. 开启“拓扑复习模式”，系统能精准遮蔽关键因果依赖边，根据答辩反馈动态调整各机制节点的遗忘复现间隔。
 
 ---
 
 ## 3. 致后续开发 Agent 的强制技术约束 (Constraints & Invariants)
 
-在后续的迭代中，**任何接手本工程的协同智能体必须无条件遵循以下工程铁律**：
 
 ### 约束 1：异步对象动态寻址强一致性 (Node ID Mutation Invariant)
 * **教训总结**：在调用多模态 OCR 等长耗时（>10s）异步接口时，前端定时轮询或用户交互会重新实例化全局 `graph` 数组。若闭包内持有的是发起前的旧对象引用（`node.ocrStatus = 'done'`），会导致更新丢失并引发界面“正在反编译”永久卡死。
