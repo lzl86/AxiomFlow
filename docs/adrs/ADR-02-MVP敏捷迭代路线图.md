@@ -105,7 +105,8 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     3. **跨文献实证图谱融合 (Cross-Paper Fusion)**：基于 MVP 3.5 的章节大纲经纬度，将来自【论文 A 弱散射章节】与【论文 B 玻恩近似章节】的实证卡片同时连入同一个课题节点，由大模型进行交叉比对（Cross-Examination），自动挖掘理论冲突与学术空白；
     4. **Obsidian 静态知识库与动态 DAG 画布双向水合 (Bidirectional Obsidian Hydration Pipeline)**：
        * **静态笔记 $\to$ 动态 DAG 拓扑反演**：输入任一 Obsidian 概念（如 `[[虚拟内存]]`），后端自动扫描解析其入链与出链依赖，在画布上一键展开为包含前置公理与衍生结论的局部因果子图；
-       * **动态推演 $\to$ 结构化笔记结晶**：画布探究完成后，支持将当前有效祖先推演链路一键结晶导出为符合 Obsidian 规范、携带标准 Wikilinks 与学术锚点的复盘 Markdown 笔记，实现知识资产沉淀闭环。
+       * **声明式 Tracer 数据块无损活化**：笔记中内嵌的 ````tracer:<type>```` 声明式参数块（如套接字生命周期、做市商去抽水等），在水合时由画布自动识别并激活为原地可交互的微部件；
+       * **动态推演 $\to$ 结构化笔记结晶**：画布探究完成后，支持将当前有效祖先推演链路一键结晶导出为符合 Obsidian 规范、携带标准 Wikilinks 与学术锚点的复盘 Markdown 笔记；**严格过滤所有动态渲染出的 DOM/脚本，仅持久化纯净声明式数据块**，实现知识资产沉淀闭环。
     5. **外部 AI 对话记录水合与问答因果拓扑化 (Web AI Chat Markdown Ingestion & Multi-Turn Decomposition)**：
        * **跨平台科研探索接力与标准防腐层 (Anti-Corruption Layer)**：
          * 用户在网页端（Gemini / Claude / ChatGPT）进行前沿发散探讨后，借助成熟浏览器扩展（如 *AI Exporter*）导出标准化 Markdown；
@@ -125,23 +126,28 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     4. **[⏳ 规划中]** 支持将插件导出的 `.md` 文件从 Edge 下载托盘直接拖入画布，或点击插件 `Copy` 按钮后在画布直接按 `Ctrl+V` 粘贴；系统在 1 秒内完成多轮问答语法解构，自动生成对齐父子因果逻辑的卡片网络，且节点沿因果流向整齐排布、零重叠。
 
 ### 阶段 8: MVP 4.5 (数学物理数值仿真、形式化求解与微观系统原生沙盒 / Symbolic, Numeric, Formal & System Tracers) —— [规划中]
-*   **主场模块**：`server.py` (`/api/execute-tracer`, `/api/z3-solve`), `computational_backend/`, `public/app.js`
+*   **主场模块**：`server.py` (`/api/execute-tracer`, `/api/z3-solve`), `computational_backend/`, `public/app.js`, `public/tracers/`
 *   **核心升级**：
     1. **符号数学求导 (SymPy Engine)**：针对节点中反编译提取出的 LaTeX 表达式，支持一键在后端调用 SymPy 进行解析求导与泰勒级数展开；
     2. **物理光场数值离散 (SciPy/NumPy)**：针对基尔霍夫衍射公式等复杂积分，支持一键运行轻量数值仿真，直接在卡片中输出物方与像方光斑对比热力图；
-    3. **微观系统状态转移追踪器 (Micro-Architecture & Cache State Tracers / Explorable Sandbox)**：
-       * **原生零构建可交互微部件 (Zero-Build DOM/SVG Explorable Widgets)**：贯彻 Bret Victor 的“可探索解释 (Explorable Explanations)”范式，彻底终结静态文本，支持节点生成并原地运行轻量级、确定性的 Python/JS 状态机追踪器，支持双手直接在卡片内拖动参数滑块进行微观硬件推演；
-       * **流水线周期演进追踪器 (Y86-64 Pipeline Tracer)**：针对处理器体系结构（如 CS:APP 第 4 章），支持在卡片中单步运行 5 级流水线时序模拟，逐周期动态打印：
-         `[Cycle 1] Fetch: 0x4000 | Decode: NOP | Exec: NOP | Hazard: Stall`
-         自动展示数据转发（Forwarding）路径、分支预测错误与气泡（Bubble）插入过程，将人类大脑从“在脑中模拟 5 级寄存器变化的低效虚拟机”中彻底解放，专注于高层时序权衡（Trade-offs）；
-       * **Cache 组相联状态转移追踪器 (Cache Associativity Simulator)**：针对存储器层次结构（如 CS:APP 第 6 章），动态切分物理地址位段（Tag / Set Index / Block Offset），单步追踪内存访问流的 Hit / Cold Miss / Conflict Miss 及 LRU 淘汰链；支持用户在卡片内微调相联度 $E$ 和块大小 $B$，毫秒级重绘冲突颠簸状态；
-       * **反事实假设检验 (What-if Counterfactuals)**：支持用户在节点内直接修改微架构控制信号或硬件参数，即时对比时序差分（State Diff），实现“零脑力内耗、秒级感知硬件物理边界”；
+    3. **微观系统状态转移追踪器 (Micro-Architecture & Quantitative State Tracers / Explorable Sandbox)**：
+       * **原生零构建模块化微部件注册体系 (Zero-Build Scoped Tracer Engine)**：
+         * 贯彻 Bret Victor 的“可探索解释 (Explorable Explanations)”范式，建立 `public/tracers/` 原生 ESM 微插件库；
+         * 彻底终结在 Markdown 中乱塞 `<script>` 的脏代码反模式，统一采用标准 `export function mountTracer(container, params)` 规范，状态与 DOM 生命周期严格隔离在卡片局部容器内；
+       * **体系结构四大多学科实战阵地 (Core Tracer Matrix)**：
+         * **流水线周期演进追踪器 (`public/tracers/y86_pipeline.js` · CS:APP 第 4 章)**：单步运行 5 级流水线时序模拟，逐周期动态打印转发路径、分支预测错误与气泡（Bubble）插入过程，解放脑内低速虚拟机；
+         * **Cache 组相联状态转移追踪器 (`public/tracers/cache_simulator.js` · CS:APP 第 6 章)**：动态切分物理地址位段（Tag / Set Index / Block Offset），单步追踪内存访问流的 Hit / Cold Miss / Conflict Miss 及 LRU 淘汰链，毫秒级重绘冲突颠簸状态；
+         * **并发套接字生命周期单步器 (`public/tracers/socket_lifecycle.js` · CS:APP 第 11 章)**：单步追踪 `socket` $\to$ `bind` $\to$ `listen` $\to$ `accept` $\to$ `fork()` $\to$ `close()` 过程中的**内核三级表状态转移（进程描述符表 / 打开文件表 `refcnt` / TCP 四元组连接）**，用动态数字高亮彻底弄懂“为何父进程必须 close(connfd) 且连接不会断开”；
+         * **做市商盘口与去抽水微观沙盒 (`public/tracers/betting_hold.js` · 预测市场与量化博弈)**：动态调节主客队赔率与知情聪明钱倾斜度（Toxic Order Flow），实时渲染做市商单边库存暴露盈亏（PnL）、去抽水公平真实胜率（Fair Odds）与凯利准则最优仓位配比；
+       * **DAG 跨卡片参数总线 (DAG Inter-Card Reactive State Bus)**：
+         * 支持微部件沿有向边向后传递衍生状态（例如：上游做市商微部件计算出的无抽水公平胜率，沿因果连线实时注入下游凯利下注卡片，触发下游仓位曲线毫秒级重绘）；
+       * **反事实假设检验 (What-if Counterfactuals)**：支持用户在节点内直接修改微架构控制信号、网络负载或做市商参数，即时对比时序差分（State Diff），实现“零脑力内耗、秒级感知物理边界”；
     4. **SMT / Z3 形式化不变量约束求解探针 (Formal Invariant & Z3 Prover Engine)**：
        * 后端集成 Z3 求解器，专门针对底层位级算法（如 Data Lab 的 `bitAnd`, `howManyBits`）与状态机互斥不变量；
        * 支持在 100 毫秒内对用户实现与标准形式化规格进行全空间（$2^{32}$）数学等价性证明；若存在逻辑缺陷，直接反向求解并输出全空间唯一的“最小破坏性反例输入（Minimal Failing Counterexample）”，彻底取代低效盲目的人肉穷举测试。
 *   **验收标准**：
     1. 学术卡片不仅能“讲道理”，还能“算结果”，打通大模型推理与确定性数值仿真的闭环；
-    2. 在画布上点击“运行微架构追踪”，卡片能在 0.1 秒内输出周期级的五级流水线时序图或 Cache 状态转移对账表；修改参数（如 $E=1 \to E=2$）后，冲突判定与时序波形毫秒级实时重绘；
+    2. 在画布上点击“运行微架构追踪”，卡片能在 0.1 秒内输出周期级的五级流水线时序图、Cache 状态转移对账表或并发套接字 `refcnt` 转移图；修改参数后毫秒级实时重绘；
     3. 针对任意位运算函数，点击“Z3 形式化验证”，能在 0.2 秒内输出严格数学证明或定位到导致溢出的具体 32 位十六进制反例值。
 
 ### 阶段 9: MVP 5.0 (全自动化科研综述导出、拓扑间隔复习与离线私有沙盒 / Synthesizer, Topological Spaced-Repetition & Privacy Sandbox) —— [终极目标]
@@ -198,3 +204,10 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
   1. **无阻塞操作**：连线剪断严禁使用任何阻塞式确认模态框（Modal）；
   2. **下游流入端口直觉拔线**：支持用户直接在下游节点的输入端口（`.port.in`）进行管理——单击唤出流入依赖快速管理气泡（Port Popover），或向左反向拖拽即可物理拔除连线；
   3. **非阻塞撤销联动**：连线拔除后通过底部轻量 Toast 提供“撤销”按钮，并与全局 `Ctrl+Z` 历史撤销栈严格联动，兼顾极速操作与容错安全。
+
+### 约束 7：Markdown 零脚本污染与声明式交互沙盒底线 (The Clean Markdown & Declarative Tracer Invariant)
+* **教训总结**：若为了追求前端可交互性，直接将 `<script>`、`<style>` 或内联事件监听器写入导出的 `.md` 文件，不仅会触发 Obsidian 等标准 Markdown 渲染器的 XSS 安全屏蔽而失效，还会严重污染版本控制系统（Git Diff 灾难），彻底摧毁知识资产跨平台、长周期的永恒便携性。
+* **强制规范**：
+  1. **资产与运行时严格解耦**：本地 `.md` 笔记只承担“声明式静态真理（Declarative Truth）”，严禁包含任何原生脚本与 DOM 操纵逻辑；AxiomFlow 独立承担“程序式交互执行（Imperative Runtime）”；
+  2. **声明式语法块契约**：所有交互式推演卡片必须通过标准的 ````tracer:<type>```` 声明式配置块（YAML/JSON 参数）与 AxiomFlow 引擎解耦；
+  3. **微部件独立沙箱化**：所有 Tracer 实现必须作为独立的 ESM 微插件置于 `public/tracers/` 目录下，并严格封装在卡片局部的 Shadow DOM 或作用域容器中，禁止污染 `window` 全局命名空间。
