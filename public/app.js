@@ -40,6 +40,83 @@ let dragStartPos = { x: 0, y: 0 };
 let isActuallyDragging = false;
 let connectingSourceId = null;
 let tempMousePos = { x: 0, y: 0 };
+let unpluggingState = null; // 下游断线/拔除临时交互状态
+
+// 拓扑图历史快照栈 (为连线剪除与节点调整提供 Ctrl+Z 毫秒级复原，杜绝突兀弹窗)
+const graphHistory = [];
+const MAX_GRAPH_HISTORY = 30;
+
+function pushGraphHistory() {
+  try {
+    graphHistory.push(JSON.stringify({
+      nodes: graph.nodes,
+      edges: graph.edges
+    }));
+    if (graphHistory.length > MAX_GRAPH_HISTORY) graphHistory.shift();
+  } catch (e) {
+    console.warn('保存历史快照失败:', e);
+  }
+}
+
+function undoGraph() {
+  if (graphHistory.length === 0) {
+    showToastNotification("已是最初状态，无更多可撤销操作");
+    return;
+  }
+  const snapshotJson = graphHistory.pop();
+  try {
+    const snapshot = JSON.parse(snapshotJson);
+    graph.nodes = snapshot.nodes || [];
+    graph.edges = snapshot.edges || [];
+    saveGraph();
+    renderNodes();
+    requestAnimationFrame(() => renderEdges());
+    if (selectedNodeId) updateContextInspector();
+    showToastNotification("↩️ 已成功撤销上一步操作 (连线与拓扑已复原)");
+  } catch (err) {
+    console.error('撤销失败:', err);
+  }
+}
+
+// 统一非阻塞轻量 Toast 通知条与快速撤销通道
+function showToastNotification(htmlText, onUndo = null) {
+  let toast = document.getElementById('axiom-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'axiom-toast';
+    document.body.appendChild(toast);
+  }
+
+  toast.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span>${htmlText}</span>
+      ${onUndo ? `<button id="btn-toast-undo" style="background: rgba(99,102,241,0.25); border: 1px solid #818cf8; color: #c7d2fe; font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer; transition: background 0.15s;">↩️ 撤销 (Ctrl+Z)</button>` : ''}
+    </div>
+  `;
+  toast.className = 'axiom-toast show';
+
+  if (onUndo) {
+    const undoBtn = document.getElementById('btn-toast-undo');
+    if (undoBtn) {
+      undoBtn.onclick = (e) => {
+        e.stopPropagation();
+        onUndo();
+        toast.className = 'axiom-toast';
+      };
+    }
+  }
+
+  toast.onmouseenter = () => clearTimeout(toast._hideTimer);
+  toast.onmouseleave = () => {
+    clearTimeout(toast._hideTimer);
+    toast._hideTimer = setTimeout(() => { toast.className = 'axiom-toast'; }, 3000);
+  };
+
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => {
+    toast.className = 'axiom-toast';
+  }, 7000);
+}
 
 // 概念询问上下文缓存
 let inquiryParentNode = null;
@@ -264,8 +341,14 @@ function createNodeElement(node) {
     statusBadge = `<span style="color: #f59e0b; font-size: 11px;">● 待生成</span>`;
   }
 
+  const incomingCount = (graph.edges || []).filter(e => e.target === node.id).length;
+  const inPortTitle = incomingCount > 0
+    ? `流入依赖 (${incomingCount} 条) · 点击管理断线，或按住向左拖出以拔除连线`
+    : `上下文流入 (在此释放连线)`;
+  const inPortClass = incomingCount > 0 ? 'port in has-incoming' : 'port in';
+
   div.innerHTML = `
-    <div class="port in" data-port="in" data-node="${node.id}" title="上下文流入 (在此释放连线)"></div>
+    <div class="${inPortClass}" data-port="in" data-node="${node.id}" title="${inPortTitle}"></div>
     <div class="port out" data-port="out" data-node="${node.id}" title="上下文流出 (按住拖拽连线)"></div>
     <div class="node-header">
       <div class="node-title-group">
@@ -437,6 +520,8 @@ function renderEdges() {
     </defs>
     <!-- 专用临时拖拽连线（避免频繁 DOM 创建与销毁） -->
     <path id="temp-connecting-path" class="edge-path" style="stroke: #38bdf8; stroke-dasharray: 5 5; pointer-events: none; display: none;"></path>
+    <!-- 专用临时反向拔除/断线连线 -->
+    <path id="temp-disconnecting-path" class="edge-path" style="stroke: #f43f5e; stroke-dasharray: 6 5; stroke-width: 3.2px; pointer-events: none; display: none; filter: drop-shadow(0 0 10px rgba(244, 63, 94, 0.85));"></path>
   `;
 
   (graph.edges || []).forEach(edge => {
@@ -458,12 +543,6 @@ function renderEdges() {
     hitPath.dataset.source = edge.source;
     hitPath.dataset.target = edge.target;
     hitPath.dataset.id = edge.id;
-    hitPath.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (confirm("是否剪断此连线？（剪断后该节点将从下游 AI 视野中物理切除）")) {
-        deleteEdge(edge.id);
-      }
-    });
 
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", pathD);
@@ -473,7 +552,24 @@ function renderEdges() {
     path.dataset.source = edge.source;
     path.dataset.target = edge.target;
     path.dataset.id = edge.id;
-    path.title = "点击可剪断该上下文依赖";
+    path.title = "点击直接剪断此依赖连线 (或在下游端口拔除)";
+
+    // 鼠标悬停高亮同步
+    hitPath.addEventListener("mouseenter", () => path.classList.add("edge-hover"));
+    hitPath.addEventListener("mouseleave", () => path.classList.remove("edge-hover"));
+
+    // 点击直接剪断（彻底根除突兀的原生 confirm 弹窗，支持 Ctrl+Z 毫秒级复原）
+    hitPath.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const sNode = graph.nodes.find(n => n.id === edge.source);
+      const tNode = graph.nodes.find(n => n.id === edge.target);
+      const sTitle = sNode ? (sNode.title || sNode.id) : edge.source;
+      const tTitle = tNode ? (tNode.title || tNode.id) : edge.target;
+      deleteEdge(edge.id);
+      showToastNotification(`✂️ 已剪断依赖：<strong>${escapeHtml(sTitle)}</strong> ➔ <strong>${escapeHtml(tTitle)}</strong>`, () => {
+        undoGraph();
+      });
+    });
 
     svgEdges.appendChild(hitPath);
     svgEdges.appendChild(path);
@@ -482,6 +578,26 @@ function renderEdges() {
   if (connectingSourceId) {
     updateTempConnectingEdge();
   }
+  if (unpluggingState && unpluggingState.isDragging) {
+    updateDisconnectingEdge();
+  }
+
+  // 同步刷新各节点流入端口的连线状态与提示
+  const targetCounts = {};
+  (graph.edges || []).forEach(e => {
+    targetCounts[e.target] = (targetCounts[e.target] || 0) + 1;
+  });
+  document.querySelectorAll('.port.in').forEach(p => {
+    const nid = p.dataset.node;
+    const count = targetCounts[nid] || 0;
+    if (count > 0) {
+      p.classList.add('has-incoming');
+      p.title = `流入依赖 (${count} 条) · 点击管理断线，或按住向左拖出以拔除连线`;
+    } else {
+      p.classList.remove('has-incoming');
+      p.title = '上下文流入 (在此释放连线)';
+    }
+  });
 
   // 保持当前选中的拓扑高亮状态
   if (selectedNodeId) {
@@ -522,6 +638,38 @@ function updateTempConnectingEdge() {
   } else {
     tempPath.style.display = "none";
   }
+}
+
+// 增量更新从下游拔除/断开连线的动态路径
+function updateDisconnectingEdge() {
+  const discPath = document.getElementById('temp-disconnecting-path');
+  if (!discPath) return;
+
+  if (unpluggingState && unpluggingState.isDragging) {
+    let startX, startY;
+    if (unpluggingState.pulledEdge) {
+      // 只有一条入边时：从上游端口拔出悬空连线，末端跟随光标游动
+      const sPt = getPortCenter(unpluggingState.pulledEdge.source, true);
+      startX = sPt.x;
+      startY = sPt.y;
+    } else {
+      // 多条入边时：从下游流入端口射出红色剪断激光线
+      const tPt = getPortCenter(unpluggingState.targetId, false);
+      startX = tPt.x;
+      startY = tPt.y;
+    }
+    const pathD = calculateBezierPath(startX, startY, tempMousePos.x, tempMousePos.y);
+    discPath.setAttribute("d", pathD);
+    discPath.style.display = "block";
+  } else {
+    discPath.style.display = "none";
+  }
+}
+
+function hideDisconnectingEdge() {
+  const discPath = document.getElementById('temp-disconnecting-path');
+  if (discPath) discPath.style.display = 'none';
+  document.querySelectorAll('.edge-path.unplugging').forEach(el => el.classList.remove('unplugging'));
 }
 
 // 拓扑因果聚焦高亮算法 (拓扑降噪与上下文流视效)
@@ -2551,6 +2699,9 @@ function setupEventListeners() {
   });
 
   container.addEventListener('click', (e) => {
+    if (!e.target.closest('.port-in-popover') && !e.target.closest('.port.in')) {
+      closePortPopover();
+    }
     if (e.target.closest('.node') || e.target.closest('.port') || e.target.closest('.zoom-controls') || e.target.closest('.edge-hitarea')) return;
     selectedNodeId = null;
     applyTopologyFocus(null);
@@ -2559,7 +2710,7 @@ function setupEventListeners() {
 
   let mouseMoveRaf = null;
   window.addEventListener('mousemove', (e) => {
-    if (!isPanning && !draggingNodeId && !connectingSourceId) return;
+    if (!isPanning && !draggingNodeId && !connectingSourceId && !unpluggingState) return;
 
     if (isPanning) {
       pan.x = e.clientX - startPan.x;
@@ -2578,6 +2729,16 @@ function setupEventListeners() {
       }
     } else if (connectingSourceId) {
       tempMousePos = screenToWorld(e.clientX, e.clientY);
+    } else if (unpluggingState) {
+      const dist = Math.hypot(e.clientX - unpluggingState.startClientX, e.clientY - unpluggingState.startClientY);
+      if (dist > 4) {
+        unpluggingState.isDragging = true;
+        tempMousePos = screenToWorld(e.clientX, e.clientY);
+        if (unpluggingState.pulledEdge) {
+          const origPath = svgEdges.querySelector(`.edge-path[data-edge-id="${unpluggingState.pulledEdge.id}"]`);
+          if (origPath) origPath.classList.add('unplugging');
+        }
+      }
     }
 
     if (!mouseMoveRaf) {
@@ -2595,6 +2756,8 @@ function setupEventListeners() {
           }
         } else if (connectingSourceId) {
           updateTempConnectingEdge();
+        } else if (unpluggingState && unpluggingState.isDragging) {
+          updateDisconnectingEdge();
         }
       });
     }
@@ -2613,13 +2776,18 @@ function setupEventListeners() {
       if (wasDragging) saveGraph();
     }
 
+    const rawTargetEl = (e.target && typeof e.target.closest === 'function')
+      ? e.target
+      : (typeof document.elementFromPoint === 'function' ? document.elementFromPoint(e.clientX, e.clientY) : null);
+
     if (connectingSourceId) {
-      const portIn = e.target.closest('.port.in');
+      const portIn = rawTargetEl?.closest('.port.in');
       if (portIn) {
         const targetId = portIn.dataset.node;
         if (targetId && targetId !== connectingSourceId) {
           const exists = graph.edges.some(edge => edge.source === connectingSourceId && edge.target === targetId);
           if (!exists) {
+            pushGraphHistory();
             graph.edges.push({
               id: `e_${Date.now()}`,
               source: connectingSourceId,
@@ -2635,6 +2803,86 @@ function setupEventListeners() {
       }
       connectingSourceId = null;
       updateTempConnectingEdge();
+    }
+
+    if (unpluggingState) {
+      const state = unpluggingState;
+      unpluggingState = null;
+      hideDisconnectingEdge();
+
+      if (state.isDragging) {
+        const dist = Math.hypot(e.clientX - state.startClientX, e.clientY - state.startClientY);
+        if (dist > 15) {
+          const dropPortIn = rawTargetEl?.closest('.port.in');
+          const dropPortOut = rawTargetEl?.closest('.port.out');
+          const dropNode = rawTargetEl?.closest('.node');
+
+          // 1. 拖到其他下游节点的输入端口：连线改接 (Rewire)
+          if (dropPortIn && state.pulledEdge) {
+            const newTargetId = dropPortIn.dataset.node;
+            if (newTargetId && newTargetId !== state.pulledEdge.source && newTargetId !== state.targetId) {
+              pushGraphHistory();
+              state.pulledEdge.target = newTargetId;
+              saveGraph();
+              renderEdges();
+              showToastNotification(`🔄 连线已成功改接到新下游节点！`, () => undoGraph());
+              return;
+            }
+          }
+
+          // 2. 拖到特定上游节点或其输出端口：精准剪断该特定上游依赖
+          if (dropPortOut || (dropNode && dropNode.dataset.id !== state.targetId)) {
+            const sourceId = dropPortOut ? dropPortOut.dataset.node : dropNode.dataset.id;
+            const targetEdge = state.incoming.find(ed => ed.source === sourceId);
+            if (targetEdge) {
+              pushGraphHistory();
+              const sNode = graph.nodes.find(n => n.id === targetEdge.source);
+              const sTitle = sNode ? (sNode.title || sNode.id) : targetEdge.source;
+              deleteEdge(targetEdge.id);
+              showToastNotification(`✂️ 已精准切除与【${escapeHtml(sTitle)}】的连线`, () => undoGraph());
+              return;
+            }
+          }
+
+          // 3. 甩到空白画布处松手：直接拔断！
+          if (state.pulledEdge) {
+            pushGraphHistory();
+            const sNode = graph.nodes.find(n => n.id === state.pulledEdge.source);
+            const sTitle = sNode ? (sNode.title || sNode.id) : state.pulledEdge.source;
+            deleteEdge(state.pulledEdge.id);
+            showToastNotification(`✂️ 已从下游成功拔除并切断连线【${escapeHtml(sTitle)}】`, () => undoGraph());
+            return;
+          } else if (state.incoming.length > 1) {
+            // 多条入边：根据鼠标拖拽矢量方向切除最匹配的那根
+            const mouseWorld = screenToWorld(e.clientX, e.clientY);
+            let closestEdge = null;
+            let minDistance = Infinity;
+            for (const ed of state.incoming) {
+              const srcNode = graph.nodes.find(n => n.id === ed.source);
+              if (srcNode) {
+                const d = Math.hypot(srcNode.x - mouseWorld.x, srcNode.y - mouseWorld.y);
+                if (d < minDistance) {
+                  minDistance = d;
+                  closestEdge = ed;
+                }
+              }
+            }
+            if (closestEdge) {
+              pushGraphHistory();
+              const sNode = graph.nodes.find(n => n.id === closestEdge.source);
+              const sTitle = sNode ? (sNode.title || sNode.id) : closestEdge.source;
+              deleteEdge(closestEdge.id);
+              showToastNotification(`✂️ 已根据拖拽方向拔除连线【${escapeHtml(sTitle)}】`, () => undoGraph());
+              return;
+            }
+          }
+        }
+        renderEdges();
+      } else {
+        // 用户仅仅是单击了 .port.in：呼出精致的快速断线菜单气泡！
+        renderEdges();
+        showPortInPopover(state.targetId, e.clientX, e.clientY);
+      }
     }
   });
 
@@ -2685,14 +2933,36 @@ function setupEventListeners() {
     updateZoomIndicator();
   }, { passive: false });
 
-  // 连线从输出端口触发
+  // 连线与下游断线触发
   container.addEventListener('mousedown', (e) => {
+    closePortPopover();
+
     const portOut = e.target.closest('.port.out');
     if (portOut) {
       connectingSourceId = portOut.dataset.node;
       tempMousePos = screenToWorld(e.clientX, e.clientY);
       updateTempConnectingEdge();
       e.stopPropagation();
+      return;
+    }
+
+    const portIn = e.target.closest('.port.in');
+    if (portIn) {
+      const targetId = portIn.dataset.node;
+      const incoming = (graph.edges || []).filter(edge => edge.target === targetId);
+
+      unpluggingState = {
+        targetId,
+        incoming,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        pulledEdge: incoming.length === 1 ? incoming[0] : null,
+        isDragging: false
+      };
+
+      tempMousePos = screenToWorld(e.clientX, e.clientY);
+      e.stopPropagation();
+      return;
     }
   });
 
@@ -3432,6 +3702,16 @@ function setupEventListeners() {
 
   // 全局快捷键与 Esc 键
   window.addEventListener('keydown', (e) => {
+    // 全局 Ctrl+Z / Cmd+Z 撤销（非输入框内生效）
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+      const activeEl = document.activeElement;
+      if (!activeEl || (activeEl.tagName !== 'INPUT' && activeEl.tagName !== 'TEXTAREA' && !activeEl.isContentEditable)) {
+        e.preventDefault();
+        undoGraph();
+        return;
+      }
+    }
+
     if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
       e.preventDefault();
       toggleSidebar();
@@ -3441,6 +3721,16 @@ function setupEventListeners() {
       openCodeModal();
     }
     if (e.key === 'Escape') {
+      closePortPopover();
+      if (unpluggingState) {
+        unpluggingState = null;
+        hideDisconnectingEdge();
+        renderEdges();
+      }
+      if (connectingSourceId) {
+        connectingSourceId = null;
+        updateTempConnectingEdge();
+      }
       const sidebar = document.getElementById('sidebar-sessions');
       if (sidebar && sidebar.classList.contains('open')) closeSidebar();
       if (cardModal && cardModal.style.display === 'flex') cardModal.style.display = 'none';
@@ -3450,6 +3740,112 @@ function setupEventListeners() {
       if (codeModal && codeModal.style.display === 'flex') closeCodeModal();
     }
   });
+}
+
+// 下游流入端口快速断线与依赖管理气泡
+function showPortInPopover(targetId, clientX, clientY) {
+  closePortPopover();
+
+  const targetNode = graph.nodes.find(n => n.id === targetId);
+  if (!targetNode) return;
+
+  const incoming = (graph.edges || []).filter(e => e.target === targetId);
+  const popover = document.createElement('div');
+  popover.className = 'port-in-popover';
+  popover.id = 'port-in-popover';
+
+  if (incoming.length === 0) {
+    popover.innerHTML = `
+      <div class="port-in-popover-title">
+        <span>🔌 流入上下文</span>
+        <button class="popover-close-btn" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;">✕</button>
+      </div>
+      <div style="font-size: 11.5px; color: #94a3b8; padding: 4px 6px;">该节点暂无流入依赖。<br>可从上游节点右侧端口拖线接入。</div>
+    `;
+  } else {
+    let itemsHtml = '';
+    incoming.forEach(ed => {
+      const srcNode = graph.nodes.find(n => n.id === ed.source);
+      const srcTitle = srcNode ? (srcNode.title || srcNode.id) : ed.source;
+      itemsHtml += `
+        <div class="port-in-popover-item" data-edge-id="${ed.id}">
+          <span style="font-size: 11.5px; color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;" title="${escapeHtml(srcTitle)}">
+            ${escapeHtml(srcTitle)}
+          </span>
+          <button class="btn-cut" data-edge-id="${ed.id}">✂️ 剪断</button>
+        </div>
+      `;
+    });
+
+    const cutAllBtn = incoming.length > 1 ? `
+      <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08); text-align: right;">
+        <button id="btn-popover-cut-all" style="background: rgba(244,63,94,0.15); border: 1px solid rgba(244,63,94,0.4); color: #f43f5e; font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer;">✕ 剪断全部流入依赖</button>
+      </div>
+    ` : '';
+
+    popover.innerHTML = `
+      <div class="port-in-popover-title">
+        <span>🔌 流入依赖 (${incoming.length} 条)</span>
+        <button class="popover-close-btn" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;">✕</button>
+      </div>
+      <div class="port-in-popover-list">
+        ${itemsHtml}
+      </div>
+      ${cutAllBtn}
+    `;
+  }
+
+  document.body.appendChild(popover);
+
+  // 计算自适应居中或对齐位置
+  const rect = popover.getBoundingClientRect();
+  let left = clientX - rect.width - 14;
+  let top = clientY - rect.height / 2;
+  if (left < 10) left = clientX + 20;
+  if (top < 10) top = 10;
+  if (top + rect.height > window.innerHeight - 10) top = window.innerHeight - rect.height - 10;
+
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+
+  // 绑定关闭与剪切操作
+  popover.querySelector('.popover-close-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closePortPopover();
+  });
+
+  popover.querySelectorAll('.btn-cut, .port-in-popover-item').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const edgeId = el.dataset.edgeId;
+      if (edgeId) {
+        const ed = (graph.edges || []).find(x => x.id === edgeId);
+        const sNode = ed ? graph.nodes.find(n => n.id === ed.source) : null;
+        const sTitle = sNode ? (sNode.title || sNode.id) : '上游';
+        pushGraphHistory();
+        deleteEdge(edgeId);
+        closePortPopover();
+        showToastNotification(`✂️ 已剪断与【${escapeHtml(sTitle)}】的依赖连线`, () => undoGraph());
+      }
+    });
+  });
+
+  const btnCutAll = popover.querySelector('#btn-popover-cut-all');
+  if (btnCutAll) {
+    btnCutAll.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pushGraphHistory();
+      const edgesToDelete = incoming.map(ed => ed.id);
+      edgesToDelete.forEach(id => deleteEdge(id));
+      closePortPopover();
+      showToastNotification(`✂️ 已剪断该节点的全部 ${edgesToDelete.length} 条流入依赖`, () => undoGraph());
+    });
+  }
+}
+
+function closePortPopover() {
+  const p = document.getElementById('port-in-popover');
+  if (p) p.remove();
 }
 
 function openCodeModal() {

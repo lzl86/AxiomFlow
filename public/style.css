@@ -425,16 +425,30 @@ body {
   stroke-width: 2px;
 }
 
+.edge-path.edge-hover,
 .edge-path:hover {
   stroke: #f43f5e !important;
   stroke-width: 3.6px !important;
-  filter: drop-shadow(0 0 6px rgba(244, 63, 94, 0.6));
+  filter: drop-shadow(0 0 8px rgba(244, 63, 94, 0.75));
+}
+
+.edge-path.unplugging {
+  stroke: #f43f5e !important;
+  stroke-dasharray: 4 4 !important;
+  opacity: 0.25 !important;
+}
+
+#temp-disconnecting-path {
+  stroke: #f43f5e !important;
+  stroke-dasharray: 6 5 !important;
+  stroke-width: 3.2px !important;
+  filter: drop-shadow(0 0 10px rgba(244, 63, 94, 0.85)) !important;
 }
 
 .edge-hitarea {
   fill: none;
   stroke: transparent;
-  stroke-width: 20px;
+  stroke-width: 22px;
   pointer-events: stroke;
   cursor: pointer;
 }
@@ -736,6 +750,25 @@ body {
   background: #34d399;
   border-color: #ffffff;
   box-shadow: 0 0 10px #34d399;
+}
+
+/* 下游节点已有连线时的流入端口 */
+.port.in.has-incoming {
+  background: #0284c7;
+  border-color: #38bdf8;
+  box-shadow: 0 0 7px rgba(56, 189, 248, 0.55);
+}
+
+.port.in.has-incoming:hover {
+  transform: translateY(-50%) scale(1.45);
+  background: #f43f5e !important;
+  border-color: #ffffff !important;
+  box-shadow: 0 0 14px rgba(244, 63, 94, 0.9) !important;
+  cursor: grab;
+}
+
+.port.in.has-incoming:active {
+  cursor: grabbing;
 }
 
 .port.out {
@@ -2590,6 +2623,103 @@ body {
   background: rgba(147, 51, 234, 0.15);
   color: #7e22ce;
 }
+
+/* 下游端口快速断线与依赖管理气泡 */
+.port-in-popover {
+  position: fixed;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 15px rgba(244, 63, 94, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  z-index: 999;
+  min-width: 220px;
+  max-width: 320px;
+  color: #f8fafc;
+  animation: popoverFadeIn 0.15s ease-out;
+}
+
+@keyframes popoverFadeIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.port-in-popover-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  padding: 2px 4px 6px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.port-in-popover-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 4px;
+}
+
+.port-in-popover-item:hover {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: rgba(244, 63, 94, 0.4);
+  color: #fecdd3;
+}
+
+.port-in-popover-item .btn-cut {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: rgba(244, 63, 94, 0.2);
+  border: 1px solid rgba(244, 63, 94, 0.5);
+  color: #f43f5e;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.port-in-popover-item .btn-cut:hover {
+  background: #f43f5e;
+  color: #ffffff;
+}
+
+/* 全局非阻塞轻量 Toast 通知条 */
+.axiom-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(244, 63, 94, 0.45);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 16px rgba(244, 63, 94, 0.3);
+  backdrop-filter: blur(14px);
+  color: #f8fafc;
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  z-index: 9999;
+  opacity: 0;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+  pointer-events: none;
+}
+
+.axiom-toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
 
 
 
