@@ -131,24 +131,35 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     1. **符号数学求导 (SymPy Engine)**：针对节点中反编译提取出的 LaTeX 表达式，支持一键在后端调用 SymPy 进行解析求导与泰勒级数展开；
     2. **物理光场数值离散 (SciPy/NumPy)**：针对基尔霍夫衍射公式等复杂积分，支持一键运行轻量数值仿真，直接在卡片中输出物方与像方光斑对比热力图；
     3. **微观系统状态转移追踪器 (Micro-Architecture & Quantitative State Tracers / Explorable Sandbox)**：
-       * **原生零构建模块化微部件注册体系 (Zero-Build Scoped Tracer Engine)**：
-         * 贯彻 Bret Victor 的“可探索解释 (Explorable Explanations)”范式，建立 `public/tracers/` 原生 ESM 微插件库；
-         * 彻底终结在 Markdown 中乱塞 `<script>` 的脏代码反模式，统一采用标准 `export function mountTracer(container, params)` 规范，状态与 DOM 生命周期严格隔离在卡片局部容器内；
-       * **体系结构四大多学科实战阵地 (Core Tracer Matrix)**：
-         * **流水线周期演进追踪器 (`public/tracers/y86_pipeline.js` · CS:APP 第 4 章)**：单步运行 5 级流水线时序模拟，逐周期动态打印转发路径、分支预测错误与气泡（Bubble）插入过程，解放脑内低速虚拟机；
-         * **Cache 组相联状态转移追踪器 (`public/tracers/cache_simulator.js` · CS:APP 第 6 章)**：动态切分物理地址位段（Tag / Set Index / Block Offset），单步追踪内存访问流的 Hit / Cold Miss / Conflict Miss 及 LRU 淘汰链，毫秒级重绘冲突颠簸状态；
-         * **并发套接字生命周期单步器 (`public/tracers/socket_lifecycle.js` · CS:APP 第 11 章)**：单步追踪 `socket` $\to$ `bind` $\to$ `listen` $\to$ `accept` $\to$ `fork()` $\to$ `close()` 过程中的**内核三级表状态转移（进程描述符表 / 打开文件表 `refcnt` / TCP 四元组连接）**，用动态数字高亮彻底弄懂“为何父进程必须 close(connfd) 且连接不会断开”；
-         * **做市商盘口与去抽水微观沙盒 (`public/tracers/betting_hold.js` · 预测市场与量化博弈)**：动态调节主客队赔率与知情聪明钱倾斜度（Toxic Order Flow），实时渲染做市商单边库存暴露盈亏（PnL）、去抽水公平真实胜率（Fair Odds）与凯利准则最优仓位配比；
+       * **神经生物学低阻抗感知架构 (Neuro-Ergonomic Sensory Pipeline)**：
+         * 贯彻 Bret Victor 的“可探索解释 (Explorable Explanations)”范式，建立 `public/tracers/` 原生 ESM 微插件库（标准 `export function mountTracer(container, params)` 规范）；
+         * **绕过前额叶符号解码高能耗瓶颈**：拒绝传统的静态表格与字符串日志打印，将复杂状态空间直接投影到人类吞吐带宽最大的**感觉皮层与运动控制回路**；
+         * **三大原生低阻抗工程维度（排除声学干扰，专注视觉与动觉极速直觉）**：
+           1. **空间拓扑化与前注意特征编码 (Preattentive Visual Pop-out)**：调用初级视皮层 V1 对高饱和撞色与几何断裂的毫秒级（50ms）并行识别本能，用红黄撞色色块直接暴露硬件争用与内存抖动；
+           2. **时间轴高帧率连续擦洗 (Scrubbable Timeline at 60FPS)**：彻底废弃机械离散的“上一步/下一步”按钮，采用类似视频剪辑器的平滑拖动滑块，激活小脑与运动皮层的“感觉-运动因果闭环 (Sensorimotor Loop)”，直观感知流水线清空（Flush）或收益率悬崖塌缩的物理冲击；
+           3. **物理场拟物隐喻 (Physical Field Skeuomorphic Metaphors)**：借用顶叶先验力学模块，将离散抽象逻辑转化为具备“管道流体、阻力粘滞、弹簧张力与重力势能”的经典力学实体。
+       * **四大多学科核心微部件全面升维 (Upgraded Tracer Matrix)**：
+         * **流水线周期瀑布甘特图 (`public/tracers/y86_pipeline.js` · CS:APP 第 4 章)**：类似 Perfetto 瀑布相图，支持 60FPS 左右高速刮擦时钟周期；遇到分支预测错误或数据冒险时，流水线被红色的波浪瞬间“冲刷粉碎（Flush）”，一眼看清气泡产生的物理撕裂；
+         * **Cache 64 字节撞色网格模拟器 (`public/tracers/cache_simulator.js` · CS:APP 第 6 章)**：将 Cache 真实映射为 64 字节微观物理格子，命中（深灰）、冷缺失（淡蓝）与**冲突颠簸 / 伪共享（高饱和荧光红）**强烈撞色，热量辐射扩散，视网膜毫秒级定位内存抖动；
+         * **并发套接字流体管道与弹簧吸附 (`public/tracers/socket_lifecycle.js` · CS:APP 第 11 章)**：套接字连接渲染为导通的荧光水管，文件描述符为磁吸触手；`fork()` 衍生双重受力触手，父进程 `close()` 断开一根弹簧但水管依然充盈，直到子进程 `close()` 触手全断，水管瞬间排空塌缩；
+         * **做市商 L3 深度热力曲面沙盒 (`public/tracers/betting_hold.js` · 预测市场与量化博弈)**：对标 Bookmap 级盘口深度热力图，知情聪明钱砸盘时盘口裂开黑色流动性真空；拖拽做市商参数滑块，实时感受 PnL 从平滑到剧烈塌缩的非线性相变；
+       * **★ 认知脚手架核心纽带：单击下钻证明引擎 (Click-to-Drill-Down Invariant Engine)**：
+         * **“用低阻抗感知触发直觉（Discovery），用高阻抗符号完成证明（Verification）”**；
+         * 微部件中的任意色块、气泡、水管断点或数值断崖均具备事件锚点，**鼠标单击该异常区域，瞬间向下穿透并高亮联动**：
+           1. 精确到字节的内存物理地址（如 `0x7fff5fbff840`）；
+           2. 对应的 C 语言源文件与精确行号；
+           3. 导致时序冲突的反汇编指令交错（Disassembly Trace）；
+           4. 关联的形式化状态机不变量违例证明。
        * **DAG 跨卡片参数总线 (DAG Inter-Card Reactive State Bus)**：
          * 支持微部件沿有向边向后传递衍生状态（例如：上游做市商微部件计算出的无抽水公平胜率，沿因果连线实时注入下游凯利下注卡片，触发下游仓位曲线毫秒级重绘）；
-       * **反事实假设检验 (What-if Counterfactuals)**：支持用户在节点内直接修改微架构控制信号、网络负载或做市商参数，即时对比时序差分（State Diff），实现“零脑力内耗、秒级感知物理边界”；
     4. **SMT / Z3 形式化不变量约束求解探针 (Formal Invariant & Z3 Prover Engine)**：
        * 后端集成 Z3 求解器，专门针对底层位级算法（如 Data Lab 的 `bitAnd`, `howManyBits`）与状态机互斥不变量；
        * 支持在 100 毫秒内对用户实现与标准形式化规格进行全空间（$2^{32}$）数学等价性证明；若存在逻辑缺陷，直接反向求解并输出全空间唯一的“最小破坏性反例输入（Minimal Failing Counterexample）”，彻底取代低效盲目的人肉穷举测试。
 *   **验收标准**：
     1. 学术卡片不仅能“讲道理”，还能“算结果”，打通大模型推理与确定性数值仿真的闭环；
-    2. 在画布上点击“运行微架构追踪”，卡片能在 0.1 秒内输出周期级的五级流水线时序图、Cache 状态转移对账表或并发套接字 `refcnt` 转移图；修改参数后毫秒级实时重绘；
-    3. 针对任意位运算函数，点击“Z3 形式化验证”，能在 0.2 秒内输出严格数学证明或定位到导致溢出的具体 32 位十六进制反例值。
+    2. 在画布上运行微架构追踪时，流水线支持 60FPS 平滑时钟刮擦，Cache 呈现 64 字节前注意撞色网格；
+    3. 点击微部件中的任意红色气泡或冲突色块，可在 0.1 秒内精准下钻联动高亮对应的 C 源码行、反汇编指令和物理内存地址；
+    4. 针对任意位运算函数，点击“Z3 形式化验证”，能在 0.2 秒内输出严格数学证明或定位到导致溢出的具体 32 位十六进制反例值。
 
 ### 阶段 9: MVP 5.0 (全自动化科研综述导出、拓扑间隔复习与离线私有沙盒 / Synthesizer, Topological Spaced-Repetition & Privacy Sandbox) —— [终极目标]
 *   **主场模块**：`exporter/latex_generator.py`, `local_engine/`, `public/app.js` (`review_mode`)
@@ -211,3 +222,12 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
   1. **资产与运行时严格解耦**：本地 `.md` 笔记只承担“声明式静态真理（Declarative Truth）”，严禁包含任何原生脚本与 DOM 操纵逻辑；AxiomFlow 独立承担“程序式交互执行（Imperative Runtime）”；
   2. **声明式语法块契约**：所有交互式推演卡片必须通过标准的 ````tracer:<type>```` 声明式配置块（YAML/JSON 参数）与 AxiomFlow 引擎解耦；
   3. **微部件独立沙箱化**：所有 Tracer 实现必须作为独立的 ESM 微插件置于 `public/tracers/` 目录下，并严格封装在卡片局部的 Shadow DOM 或作用域容器中，禁止污染 `window` 全局命名空间。
+
+### 约束 8：低阻抗感官感知与单击下钻证明铁律 (Sensory Ergonomics & Click-to-Drill-Down Invariant)
+* **教训总结**：
+  1. 传统的微部件若仅做成“输入框表单 + 数字展示”，依然在强迫人类前额叶进行低带宽串行心算，并未真正释放视觉皮层的超并行算力；
+  2. 若将微部件做成“只有花哨动画却无底层代码联动”的孤立游乐场玩具，会彻底丧失严谨系统工程的学术与实战价值。
+* **强制规范**：
+  1. **神经低阻抗三维映射（排除声学干扰，专注视动通道）**：所有微部件必须优先调用人类进化更古老的感觉与运动皮层——采用前注意特征高饱和撞色色块（视皮层 V1）、60FPS 高帧率时间轴平滑刮擦（小脑感觉-运动回路）与物理场拟物隐喻（流体管道/弹簧受力），坚决杜绝枯燥数字堆砌；
+  2. **绝对禁止无下钻能力的孤立玩具**：微部件必须严格遵守“低阻抗感知触发直觉（Discovery） ➔ 高阻抗符号完成证明（Verification）”双轨制；
+  3. **单击下钻原生集成**：微部件内部任何异常图形元素（色块、气泡、水管断点）必须监听点击事件，触发后瞬间向外发射锚点事件，联动高亮其对应的 C 语言源文件行号、精确反汇编指令与 64 字节物理内存地址。
