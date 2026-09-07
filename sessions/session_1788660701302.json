@@ -37,8 +37,8 @@
         "rip": "0x0000000000400da2",
         "eflags": "0x00000246 [PF ZF IF]"
       },
-      "disassembly": "0x400d98 <eval+88>:  callq  0x400920 <fork@plt>\\n=> 0x400d9d <eval+93>:  test   %eax,%eax\\n   0x400d9f <eval+95>:  jne    0x400dc4 <eval+132>\\n   0x400da1 <eval+97>:  mov    -0x40(%rbp),%rsi\\n   0x400da5 <eval+101>: mov    $0x2,%edi\\n   0x400daa <eval+106>: callq  0x400980 <sigprocmask@plt>\\n   0x400daf <eval+111>: xor    %esi,%esi\\n   0x400db1 <eval+113>: xor    %edi,%edi\\n   0x400db3 <eval+115>: callq  0x4009c0 <setpgid@plt>\\n   0x400db8 <eval+120>: mov    -0x20(%rbp),%rdi\\n   0x400dbc <eval+124>: callq  0x400a00 <execve@plt>",
-      "stack": "0x7fffffffe1a0:  0x0000000000401200  0x00007fffffffe2b0\\n0x7fffffffe1b0:  0x0000000000000000  0x0000000000000002\\n0x7fffffffe1c0:  0x0000000000000000  0x00007ffff7fa5d80\\n0x7fffffffe1d0:  0x00007fffffffe240  0x0000000000400da2",
+      "disassembly": "0x400d98 <eval+88>:  callq  0x400920 <fork@plt>\n=> 0x400d9d <eval+93>:  test   %eax,%eax\n   0x400d9f <eval+95>:  jne    0x400dc4 <eval+132>\n   0x400da1 <eval+97>:  mov    -0x40(%rbp),%rsi\n   0x400da5 <eval+101>: mov    $0x2,%edi\n   0x400daa <eval+106>: callq  0x400980 <sigprocmask@plt>\n   0x400daf <eval+111>: xor    %esi,%esi\n   0x400db1 <eval+113>: xor    %edi,%edi\n   0x400db3 <eval+115>: callq  0x4009c0 <setpgid@plt>\n   0x400db8 <eval+120>: mov    -0x20(%rbp),%rdi\n   0x400dbc <eval+124>: callq  0x400a00 <execve@plt>",
+      "stack": "0x7fffffffe1a0:  0x0000000000401200  0x00007fffffffe2b0\n0x7fffffffe1b0:  0x0000000000000000  0x0000000000000002\n0x7fffffffe1c0:  0x0000000000000000  0x00007ffff7fa5d80\n0x7fffffffe1d0:  0x00007fffffffe240  0x0000000000400da2",
       "notes": "fork() 返回子进程 (rax=0)，子进程即将恢复原信号掩码 prev_one 并执行 setpgid(0, 0)",
       "status": "idle",
       "x": 60,
@@ -70,12 +70,12 @@
         "rip": "0x0000000000400da2",
         "eflags": "0x00000246 [PF ZF IF]"
       },
-      "disassembly": "0x400d98 <eval+88>:  callq  0x400920 <fork@plt>\\n=> 0x400d9d <eval+93>:  test   %eax,%eax\\n   0x400d9f <eval+95>:  jne    0x400dc4 <eval+132>\\n   0x400da1 <eval+97>:  mov    -0x40(%rbp),%rsi\\n   0x400da5 <eval+101>: mov    $0x2,%edi\\n   0x400daa <eval+106>: callq  0x400980 <sigprocmask@plt>\\n   0x400daf <eval+111>: xor    %esi,%esi\\n   0x400db1 <eval+113>: xor    %edi,%edi\\n   0x400db3 <eval+115>: callq  0x4009c0 <setpgid@plt>\\n   0x400db8 <eval+120>: mov    -0x20(%rbp),%rdi\\n   0x400dbc <eval+124>: callq  0x400a00 <execve@plt>",
-      "stack": "0x7fffffffe1a0:  0x0000000000401200  0x00007fffffffe2b0\\n0x7fffffffe1b0:  0x0000000000000000  0x0000000000000002\\n0x7fffffffe1c0:  0x0000000000000000  0x00007ffff7fa5d80\\n0x7fffffffe1d0:  0x00007fffffffe240  0x0000000000400da2",
+      "disassembly": "0x400d98 <eval+88>:  callq  0x400920 <fork@plt>\n=> 0x400d9d <eval+93>:  test   %eax,%eax\n   0x400d9f <eval+95>:  jne    0x400dc4 <eval+132>\n   0x400da1 <eval+97>:  mov    -0x40(%rbp),%rsi\n   0x400da5 <eval+101>: mov    $0x2,%edi\n   0x400daa <eval+106>: callq  0x400980 <sigprocmask@plt>\n   0x400daf <eval+111>: xor    %esi,%esi\n   0x400db1 <eval+113>: xor    %edi,%edi\n   0x400db3 <eval+115>: callq  0x4009c0 <setpgid@plt>\n   0x400db8 <eval+120>: mov    -0x20(%rbp),%rdi\n   0x400dbc <eval+124>: callq  0x400a00 <execve@plt>",
+      "stack": "0x7fffffffe1a0:  0x0000000000401200  0x00007fffffffe2b0\n0x7fffffffe1b0:  0x0000000000000000  0x0000000000000002\n0x7fffffffe1c0:  0x0000000000000000  0x00007ffff7fa5d80\n0x7fffffffe1d0:  0x00007fffffffe240  0x0000000000400da2",
       "notes": "fork() 返回子进程 (rax=0)，子进程即将恢复原信号掩码 prev_one 并执行 setpgid(0, 0)",
       "status": "idle",
       "x": 60,
-      "y": 760,
+      "y": 758,
       "createdAt": 1788771355173
     },
     {
@@ -108,7 +108,7 @@
       "notes": "fork() 返回子进程 (rax=0)，子进程即将恢复原信号掩码 prev_one 并执行 setpgid(0, 0)",
       "status": "idle",
       "x": 60,
-      "y": 1110,
+      "y": 1107,
       "createdAt": 1788771380781
     },
     {
@@ -120,7 +120,7 @@
       "citation": "CS:APP 3e Chapter 8.4 ECF",
       "status": "idle",
       "x": 60,
-      "y": 410,
+      "y": 409,
       "createdAt": 1788771579101
     }
   ],

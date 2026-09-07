@@ -3589,7 +3589,7 @@ function openCardFullscreen(node) {
       ${node.stack ? `
         <div style="margin-bottom: 14px;">
           <div class="probe-grid-label" style="font-size: 12px; margin-bottom: 6px;">栈顶物理内存 Dump ($rsp)</div>
-          <pre class="code-pre" style="max-height: 180px; font-size: 11.5px; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 8px;">${escapeHtml(node.stack)}</pre>
+          <pre class="code-pre" style="max-height: 180px; font-size: 11.5px; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 8px;">${escapeHtml(String(node.stack).replace(/\\r\\n|\\n|\\r/g, '\n'))}</pre>
         </div>
       ` : ''}
       ${node.notes ? `<div style="font-size: 12.5px; color: #94a3b8; font-style: italic; margin-top: 10px;">💬 调试断点备注: ${escapeHtml(node.notes)}</div>` : ''}
@@ -3882,7 +3882,10 @@ function renderRegistersHtml(regs) {
 
 function formatDisassemblyHtml(disasm) {
   if (!disasm) return '';
-  const lines = disasm.split('\n');
+  // 规范化换行：自适应兼容真实换行符 (\n) 与 JSON 序列化误转义的字面量 ("\\n")
+  let text = String(disasm);
+  text = text.replace(/\\r\\n|\\n|\\r/g, '\n');
+  const lines = text.split(/\r?\n/);
   return lines.map(line => {
     const isTarget = line.includes('=>') || line.trim().startsWith('->');
     const safeLine = escapeHtml(line);

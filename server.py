@@ -864,7 +864,11 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 location = req_data.get("location", "").strip()
                 registers = req_data.get("registers") or {}
                 disassembly = req_data.get("disassembly", "").strip()
+                if isinstance(disassembly, str):
+                    disassembly = disassembly.replace("\\r\\n", "\n").replace("\\n", "\n").strip()
                 stack = req_data.get("stack", "").strip()
+                if isinstance(stack, str):
+                    stack = stack.replace("\\r\\n", "\n").replace("\\n", "\n").strip()
                 notes = req_data.get("notes", "").strip()
                 target_node_id = req_data.get("targetNodeId")
                 req_session_id = req_data.get("sessionId")
