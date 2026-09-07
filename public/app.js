@@ -290,12 +290,9 @@ function createNodeElement(node) {
         ? `<div class="code-block-wrapper" style="margin-top: 0; margin-bottom: 6px;">
              <div class="code-block-header">
                <span class="code-lang-tag">${escapeHtml((node.language || 'c').toUpperCase())}</span>
-               <div style="display: flex; align-items: center; gap: 6px;">
-                 <button class="code-wrap-btn ${node.isWrap ? 'active' : ''}" onclick="toggleCodeWrap(this, '${node.id}', event)" title="切换自动折行">↩ 折行</button>
-                 <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">📋 复制</button>
-               </div>
+               <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">📋 复制</button>
              </div>
-             <pre class="code-pre ${node.isWrap ? 'wrap-lines' : ''}" style="max-height: 180px;">${highlightCode(node.code || node.content || '', node.language || 'c')}</pre>
+             <pre class="code-pre" style="max-height: 180px;">${highlightCode(node.code || node.content || '', node.language || 'c')}</pre>
            </div>
            ${node.citation ? `<div class="citation-chip">📖 ${escapeHtml(node.citation)}</div>` : ''}`
         : node.kind === 'hardware_probe'
@@ -305,11 +302,8 @@ function createNodeElement(node) {
              ${renderRegistersHtml(node.registers)}
            </div>
            ${node.disassembly ? `
-             <div class="probe-grid-label">
-               <span>反汇编指令流 ($pc)</span>
-               <button class="code-wrap-btn ${node.isDisasmWrap ? 'active' : ''}" onclick="toggleDisasmWrap(this, '${node.id}', event)" title="切换自动折行">↩ 折行</button>
-             </div>
-             <div class="disasm-box ${node.isDisasmWrap ? 'wrap-lines' : ''}">${formatDisassemblyHtml(node.disassembly)}</div>
+             <div class="probe-grid-label"><span>反汇编指令流 ($pc)</span></div>
+             <div class="disasm-box">${formatDisassemblyHtml(node.disassembly)}</div>
            ` : ''}
            ${node.notes ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 6px; font-style: italic;">💬 ${escapeHtml(node.notes)}</div>` : ''}`
         : `<div class="card-question-text" style="font-weight: 600; color: var(--text-primary); line-height: 1.45; cursor: text;" title="点击可直接在右侧面板编辑问题">${renderMarkdown(node.question || '<em>(点击在此输入具体科研问题...)</em>')}</div>
