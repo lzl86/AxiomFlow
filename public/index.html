@@ -54,6 +54,10 @@
         <span>📑 文献片段</span>
       </button>
 
+      <button id="btn-add-code" class="btn" style="background: rgba(6, 182, 212, 0.15); border-color: rgba(6, 182, 212, 0.4); color: #67e8f9;" title="录入源码/算法公理实证卡片 (快捷键: Alt+C)">
+        <span>💻 源码实证</span>
+      </button>
+
       <button id="btn-toggle-reader" class="btn btn-success" title="展开/收起文献阅读器 (PDF / Markdown)">
         <span>📖 文献阅读器</span>
       </button>
@@ -246,6 +250,76 @@
           <button id="btn-cancel-inquiry" class="btn">取消</button>
           <button id="btn-submit-inquiry" class="btn btn-primary" style="padding: 8px 18px;">
             🚀 确认并展开新分支节点
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 源码公理与算法实证录入弹窗 (剪贴板建卡极速通道) -->
+  <div id="code-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card" style="width: 660px; max-width: 95vw;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">💻</span>
+          <div>
+            <h3 style="font-size: 15px; font-weight: 600; color: #f8fafc;">录入源码 / 算法公理实证卡片</h3>
+            <p style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">将内核代码、并发时序流或算法片段挂载为物理公理实证节点 (快捷键: Alt+C)</p>
+          </div>
+        </div>
+        <button id="btn-close-code-modal" class="modal-close-btn">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div>
+            <label style="font-size: 12px; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;">代码实证标题：</label>
+            <input id="code-modal-title" type="text" class="inquiry-textarea" style="height: 36px; font-size: 12.5px;" placeholder="例如: CS:APP eval() 进程组与信号掩码实现">
+          </div>
+          <div>
+            <label style="font-size: 12px; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;">编程语言：</label>
+            <select id="code-modal-lang" class="inquiry-textarea" style="height: 36px; cursor: pointer; color: #38bdf8; font-weight: 600; font-size: 12px;">
+              <option value="c" selected>C / C++</option>
+              <option value="assembly">x86-64 汇编 (Assembly)</option>
+              <option value="python">Python</option>
+              <option value="bash">Shell / Bash</option>
+              <option value="rust">Rust</option>
+              <option value="verilog">Verilog / 数字逻辑</option>
+              <option value="other">其它语言</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 12px; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;">文献 / 工程出处标签：</label>
+          <input id="code-modal-citation" type="text" class="inquiry-textarea" style="height: 34px; font-size: 12px;" placeholder="例如: CS:APP3e 第 8.5.6 节 p.534 或 csapp/eval.c:L15-L42">
+        </div>
+
+        <div style="margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label style="font-size: 12px; font-weight: 600; color: #cbd5e1;">源码正文 (等宽字体，支持指针与下划线防转义)：</label>
+            <button type="button" id="btn-paste-clipboard" class="btn" style="padding: 2px 8px; font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="一键将系统剪贴板文本贴入">📋 从剪贴板粘贴</button>
+          </div>
+          <textarea id="code-modal-content" rows="10" class="inquiry-textarea" style="font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace; font-size: 12px; line-height: 1.45; tab-size: 4; white-space: pre;" placeholder="在此直接输入或粘贴源码片段，例如：
+void eval(char *cmdline) {
+    char *argv[MAXARGS];
+    pid_t pid;
+    sigset_t mask_all, prev_one;
+    ...
+}"></textarea>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <label style="font-size: 12px; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;">可选：直接连线到画布课题节点：</label>
+          <select id="code-modal-target-node" class="inquiry-textarea" style="height: 36px; cursor: pointer; font-size: 12px;">
+            <option value="">(暂不连线，作为独立公理实证卡片入图)</option>
+          </select>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button id="btn-cancel-code-modal" class="btn">取消</button>
+          <button id="btn-submit-code-modal" class="btn btn-primary" style="padding: 8px 18px; background: linear-gradient(135deg, #0284c7, #06b6d4); border-color: #06b6d4;">
+            ⚡ 创建源码实证节点
           </button>
         </div>
       </div>

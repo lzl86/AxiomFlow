@@ -1,4 +1,4 @@
-﻿/**
+/**
  * AxiomFlow Sugiyama / Topological Rank Auto-Layout Algorithm
  * 依据科研因果逻辑实现有向无环图分层、重心启发式连线交叉最小化与包围盒防重叠排布
  */
@@ -39,18 +39,18 @@ export function calculateSugiyamaLayout(nodes, edges, options = {}) {
 
   // 2. 层级分配 (Layer Assignment / Rank Calculation)
   const ranks = new Map();
-  const hasMaterial = nodes.some(n => n.kind === 'material' || n.id.startsWith('n_mat') || n.id.startsWith('n_snip'));
+  const isGrounding = n => n.kind === 'material' || n.kind === 'source_code' || n.kind === 'hardware_probe' || n.id.startsWith('n_mat') || n.id.startsWith('n_snip') || n.id.startsWith('n_code') || n.id.startsWith('n_probe');
+  const hasGrounding = nodes.some(isGrounding);
 
   // 初始基准层判定
   nodes.forEach(n => {
-    const isMat = n.kind === 'material' || n.id.startsWith('n_mat') || n.id.startsWith('n_snip');
-    if (isMat) {
+    if (isGrounding(n)) {
       ranks.set(n.id, 0);
     } else if (n.kind === 'question') {
       // 若包含实证素材，则核心课题从 Layer 1 开始；否则从 Layer 0 开始
-      ranks.set(n.id, hasMaterial ? 1 : 0);
+      ranks.set(n.id, hasGrounding ? 1 : 0);
     } else {
-      ranks.set(n.id, hasMaterial ? 2 : 1);
+      ranks.set(n.id, hasGrounding ? 2 : 1);
     }
   });
 

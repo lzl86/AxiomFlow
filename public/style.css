@@ -473,6 +473,14 @@ body {
   border-left: 4px solid var(--accent-amber);
 }
 
+.node.source_code {
+  border-left: 4px solid #06b6d4;
+}
+
+.node.hardware_probe {
+  border-left: 4px solid #a855f7;
+}
+
 .node.pending {
   animation: pulse-border 1.5s infinite;
 }
@@ -520,6 +528,16 @@ body {
 .badge-conclusion {
   background: rgba(245, 158, 11, 0.18);
   color: #fcd34d;
+}
+
+.badge-source_code {
+  background: rgba(6, 182, 212, 0.18);
+  color: #67e8f9;
+}
+
+.badge-hardware_probe {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
 }
 
 .node-title {
@@ -2295,6 +2313,233 @@ body {
   background: rgba(0, 0, 0, 0.08);
   border-color: rgba(0, 0, 0, 0.12);
 }
+
+/* ==========================================
+   源码与硬件探针多态排版规范 (MVP 3.0)
+   ========================================== */
+.code-block-wrapper {
+  margin: 8px 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(15, 23, 42, 0.85);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+}
+
+.code-lang-tag {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #38bdf8;
+  letter-spacing: 0.5px;
+}
+
+.code-copy-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #94a3b8;
+  font-size: 10.5px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.code-copy-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.code-pre {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11.8px;
+  line-height: 1.55;
+  overflow-x: auto;
+  color: #e2e8f0;
+  tab-size: 4;
+}
+
+/* 语法高亮 Token 色彩体系 */
+.tok-kw { color: #f472b6; font-weight: 600; }
+.tok-type { color: #38bdf8; font-weight: 600; }
+.tok-fn { color: #818cf8; font-weight: 600; }
+.tok-str { color: #34d399; }
+.tok-comm { color: #64748b; font-style: italic; }
+.tok-num { color: #fbbf24; }
+.tok-macro { color: #c084fc; font-weight: 600; }
+.tok-reg { color: #fb923c; font-weight: 600; }
+.tok-op { color: #94a3b8; }
+
+/* 行内代码标记 */
+.inline-code-badge {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #38bdf8;
+}
+
+/* 硬件探针卡片专属组件 */
+.probe-loc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  color: #c084fc;
+  background: rgba(168, 85, 247, 0.12);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  margin-bottom: 8px;
+}
+
+.probe-grid-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  margin: 6px 0 3px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.reg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.28);
+  padding: 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.reg-item {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 10.5px;
+  color: #e2e8f0;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.reg-name {
+  color: #fb923c;
+  font-weight: 600;
+}
+
+.reg-val {
+  color: #34d399;
+}
+
+.disasm-box {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #94a3b8;
+  max-height: 130px;
+  overflow-y: auto;
+  white-space: pre;
+}
+
+.disasm-active-line {
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.18);
+  font-weight: 600;
+  display: inline-block;
+  width: 100%;
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+/* 硬件探针入图脉冲光晕动效 */
+@keyframes probe-halo-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.8), 0 0 20px rgba(168, 85, 247, 0.6); }
+  60% { box-shadow: 0 0 0 16px rgba(168, 85, 247, 0), 0 0 36px rgba(168, 85, 247, 0.9); }
+  100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0), 0 12px 32px rgba(0, 0, 0, 0.7); }
+}
+
+.node.probe-halo {
+  animation: probe-halo-pulse 1.8s ease-out 2;
+}
+
+/* 浅色主题适配 */
+[data-theme="light"] .code-block-wrapper {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .code-block-header {
+  background: #e2e8f0;
+  border-bottom-color: #cbd5e1;
+}
+
+[data-theme="light"] .code-pre {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+[data-theme="light"] .inline-code-badge {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0284c7;
+}
+
+[data-theme="light"] .reg-grid {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .reg-item {
+  color: #0f172a;
+}
+
+[data-theme="light"] .reg-name {
+  color: #c2410c;
+}
+
+[data-theme="light"] .reg-val {
+  color: #047857;
+}
+
+[data-theme="light"] .disasm-box {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #334155;
+}
+
+[data-theme="light"] .badge-source_code {
+  background: rgba(8, 145, 178, 0.15);
+  color: #0e7490;
+}
+
+[data-theme="light"] .badge-hardware_probe {
+  background: rgba(147, 51, 234, 0.15);
+  color: #7e22ce;
+}
+
 
 
 

@@ -663,12 +663,41 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 target_file = get_session_file(req_session_id)
 
                 chat_url = f"{api_base}/chat/completions"
+                is_micro_systems = any(k in prompt for k in [
+                    "【底层源码与硬件探针公理实证",
+                    "【底层微观机制与时序深度推导要求】",
+                    "微观机制",
+                    "并发竞态",
+                    "信号掩码",
+                    "SIGCHLD",
+                    "sigprocmask",
+                    "setpgid",
+                    "fork()",
+                    "硬件探针",
+                    "寄存器",
+                    "反汇编"
+                ])
+                if is_micro_systems:
+                    sys_prompt = (
+                        "你是一位精通计算机体系结构、操作系统内核、底层并发与逆向工程的资深系统架构师。\n"
+                        "在面对源码实现、硬件探针与底层系统调用推演时，请展开严密硬核的微观机理推导：\n"
+                        "1. 精准剖析并发竞态条件（Race Conditions）、时序交错（Interleaving）与因果不变量；\n"
+                        "2. 严密追踪内核信号掩码（Signal Mask）状态翻转、异步信号处理函数（SIGCHLD Handler）的不可预测时序；\n"
+                        "3. 剖析进程组拓扑隔离机制（如 setpgid 独立进程组）与前后台作业控制；\n"
+                        "4. 若提供了硬件探针与汇编指令，结合具体寄存器（如 %rax, %rip, %rsp）与栈帧内存状态进行交叉核验与论证。\n"
+                        "推论逻辑严密自洽，提供工业级深度的因果证明与安全边界分析。"
+                    )
+                else:
+                    sys_prompt = (
+                        "你是一位善于化繁为简、生动清晰的学术助手。在解答概念时，请以通俗易懂、重点突出、深入浅出的语言系统解释其核心概念、定义内涵与实际应用，帮助读者快速建立直观理解。除非用户明确要求数学推导，否则无需展开冗长繁复的数学公式与底层微观机理推演。如果提供了上游推演上下文或文献素材，请保持概念的一致性与严谨性。"
+                    )
+
                 payload = {
                     "model": model,
                     "messages": [
                         {
                             "role": "system",
-                            "content": "你是一位善于化繁为简、生动清晰的学术助手。在解答概念时，请以通俗易懂、重点突出、深入浅出的语言系统解释其核心概念、定义内涵与实际应用，帮助读者快速建立直观理解。除非用户明确要求数学推导，否则无需展开冗长繁复的数学公式与底层微观机理推演。如果提供了上游推演上下文或文献素材，请保持概念的一致性与严谨性。"
+                            "content": sys_prompt
                         },
                         {
                             "role": "user",
@@ -821,6 +850,117 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"ok": True, "analysis": answer, "model_used": model}).encode("utf-8"))
             except Exception as e:
                 print("OCR Formula 异常:", e)
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode("utf-8"))
+            return
+
+        elif parsed.path == "/api/probe/gdb-dump":
+            try:
+                req_data = json.loads(post_data.decode("utf-8")) if post_data else {}
+                title = req_data.get("title", "").strip()
+                location = req_data.get("location", "").strip()
+                registers = req_data.get("registers") or {}
+                disassembly = req_data.get("disassembly", "").strip()
+                stack = req_data.get("stack", "").strip()
+                notes = req_data.get("notes", "").strip()
+                target_node_id = req_data.get("targetNodeId")
+                req_session_id = req_data.get("sessionId")
+
+                idx = get_sessions_index()
+                active_id = idx.get("activeId", "session_default")
+                curr_id = req_session_id or active_id
+                target_file = get_session_file(curr_id)
+
+                graph = {"nodes": [], "edges": []}
+                if target_file.exists():
+                    try:
+                        with open(target_file, "r", encoding="utf-8") as f:
+                            graph = json.load(f)
+                    except Exception as fe:
+                        print("读取图谱失败:", fe)
+
+                new_node_id = f"n_probe_{int(time.time() * 1000)}"
+                node_title = title or (f"GDB 硬件探针 · {location}" if location else "GDB 硬件探针快照")
+
+                # 计算初始坐标
+                x = 60
+                y = 80
+                target_node = None
+                if target_node_id:
+                    target_node = next((n for n in graph.get("nodes", []) if n.get("id") == target_node_id), None)
+                
+                if target_node:
+                    x = max(40, target_node.get("x", 460) - 420)
+                    y = target_node.get("y", 100)
+                else:
+                    # 查找最左侧边界以合理并列
+                    existing_probes = [n for n in graph.get("nodes", []) if n.get("kind") in ["hardware_probe", "source_code", "material"]]
+                    if existing_probes:
+                        last_p = existing_probes[-1]
+                        x = last_p.get("x", 60)
+                        y = last_p.get("y", 60) + 320
+                    elif graph.get("nodes"):
+                        first_n = graph["nodes"][0]
+                        x = max(40, first_n.get("x", 400) - 420)
+                        y = first_n.get("y", 80)
+
+                probe_node = {
+                    "id": new_node_id,
+                    "kind": "hardware_probe",
+                    "title": node_title,
+                    "location": location,
+                    "registers": registers,
+                    "disassembly": disassembly,
+                    "stack": stack,
+                    "notes": notes,
+                    "status": "idle",
+                    "x": x,
+                    "y": y,
+                    "createdAt": int(time.time() * 1000)
+                }
+
+                graph.setdefault("nodes", []).append(probe_node)
+
+                # 自动构建拓扑连线
+                if target_node_id and target_node:
+                    edge_id = f"e_{new_node_id}_{target_node_id}"
+                    graph.setdefault("edges", []).append({
+                        "id": edge_id,
+                        "source": new_node_id,
+                        "target": target_node_id,
+                        "kind": "solid"
+                    })
+
+                with open(target_file, "w", encoding="utf-8") as wf:
+                    json.dump(graph, wf, ensure_ascii=False, indent=2)
+
+                if curr_id == active_id:
+                    sync_active_to_legacy_graph(active_id)
+
+                for s in idx.get("sessions", []):
+                    if s["id"] == curr_id:
+                        s["nodeCount"] = len(graph.get("nodes", []))
+                        s["updatedAt"] = int(time.time() * 1000)
+                        break
+                save_sessions_index(idx)
+
+                print(f"[+] [PROBE] 已成功挂载硬件探针节点 #{new_node_id} ({node_title}) -> 课题: {curr_id}")
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "ok": True,
+                    "nodeId": new_node_id,
+                    "node": probe_node,
+                    "mtime": target_file.stat().st_mtime
+                }, ensure_ascii=False).encode("utf-8"))
+            except Exception as e:
+                print("[-] 硬件探针上报处理异常:", e)
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Access-Control-Allow-Origin", "*")

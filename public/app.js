@@ -157,6 +157,7 @@ function startVersionPolling() {
       const data = await res.json();
       if (lastMtime && data.mtime > lastMtime) {
         lastMtime = data.mtime;
+        const oldNodeIds = new Set(graph.nodes.map(n => n.id));
         const resG = await fetch(`/api/graph?sessionId=${encodeURIComponent(currentSessionId)}`);
         const newGraph = await resG.json();
         graph = newGraph;
@@ -164,13 +165,28 @@ function startVersionPolling() {
         requestAnimationFrame(() => renderEdges());
         if (selectedNodeId) updateContextInspector();
         loadSessionsListOnly();
+
+        // 为新引入的硬件探针或源码实证注入 1.5 秒科技感光晕脉冲
+        const newProbes = graph.nodes.filter(n => !oldNodeIds.has(n.id) && n.kind === 'hardware_probe');
+        if (newProbes.length > 0) {
+          setTimeout(() => {
+            newProbes.forEach(np => {
+              const el = document.querySelector(`.node[data-id="${np.id}"]`);
+              if (el) {
+                el.classList.add('probe-halo');
+                setTimeout(() => el.classList.remove('probe-halo'), 3600);
+              }
+            });
+            updateStatus(`⚡ 检测到外部 GDB 硬件探针入图: ${newProbes[0].title || newProbes[0].id}`);
+          }, 80);
+        }
       } else if (!lastMtime) {
         lastMtime = data.mtime;
       }
     } catch (e) {
       // 忽略轮询网络抖动
     }
-  }, 1500);
+  }, 800);
 }
 
 // 屏幕坐标转画布世界坐标（消除顶部 54px 导航栏与缩放偏移）
@@ -233,7 +249,9 @@ function createNodeElement(node) {
   const kindNames = {
     question: '探索课题',
     material: '文献实证',
-    conclusion: '综合结论'
+    conclusion: '综合结论',
+    source_code: '源码实证',
+    hardware_probe: '硬件探针'
   };
 
   let statusBadge = '';
@@ -264,12 +282,32 @@ function createNodeElement(node) {
            ${node.ocrStatus === 'failed' ? `<div style="font-size: 11px; color: #f87171; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; background: rgba(239, 68, 68, 0.1); padding: 3px 6px; border-radius: 4px; border: 1px dashed rgba(239, 68, 68, 0.4);"><span>⚠️ 反编译未完成</span><button onclick="retryOcrFormula('${node.id}', event)" class="btn" style="padding: 1px 6px; font-size: 10px; background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5);">重新解析</button></div>` : ''}
            <blockquote>${renderMarkdown(node.excerpt || node.content || '')}</blockquote>
            ${node.citation ? `<div class="citation-chip">📖 ${escapeHtml(node.citation)}</div>` : ''}`
+        : node.kind === 'source_code'
+        ? `<div class="code-block-wrapper" style="margin-top: 0; margin-bottom: 6px;">
+             <div class="code-block-header">
+               <span class="code-lang-tag">${escapeHtml((node.language || 'c').toUpperCase())}</span>
+               <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">📋 复制</button>
+             </div>
+             <pre class="code-pre" style="max-height: 180px;">${highlightCode(node.code || node.content || '', node.language || 'c')}</pre>
+           </div>
+           ${node.citation ? `<div class="citation-chip">📖 ${escapeHtml(node.citation)}</div>` : ''}`
+        : node.kind === 'hardware_probe'
+        ? `${node.location ? `<div class="probe-loc-badge">📍 ${escapeHtml(node.location)}</div>` : ''}
+           <div class="probe-grid-label"><span>16 通用寄存器快照</span><span style="color: #64748b; font-size: 10px;">x86-64</span></div>
+           <div class="reg-grid" style="margin-bottom: 6px;">
+             ${renderRegistersHtml(node.registers)}
+           </div>
+           ${node.disassembly ? `
+             <div class="probe-grid-label"><span>反汇编指令流 ($pc)</span></div>
+             <div class="disasm-box">${formatDisassemblyHtml(node.disassembly)}</div>
+           ` : ''}
+           ${node.notes ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 6px; font-style: italic;">💬 ${escapeHtml(node.notes)}</div>` : ''}`
         : `<div class="card-question-text" style="font-weight: 600; color: var(--text-primary); line-height: 1.45; cursor: text;" title="点击可直接在右侧面板编辑问题">${renderMarkdown(node.question || '<em>(点击在此输入具体科研问题...)</em>')}</div>
            <div class="markdown-body" style="margin-top: 8px;">${isGenerating ? '<span style="color: #38bdf8;">🧠 大模型正在深度严密推演中...</span>' : renderMarkdown(node.response || '(点击右侧请求生成)')}</div>`
       }
     </div>
     <div class="node-footer">
-      <span>${node.kind === 'material' ? '客观事实锚点' : '模型思考单元'}</span>
+      <span>${node.kind === 'material' ? '客观事实锚点' : (node.kind === 'source_code' ? '源码公理锚点' : (node.kind === 'hardware_probe' ? '硬件物理快照' : '模型思考单元'))}</span>
       <div style="font-size: 10.5px; color: #64748b;">双击全屏</div>
     </div>
   `;
@@ -550,6 +588,40 @@ function updateContextInspector() {
           <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">文献出处标签：</label>
           <input id="node-edit-citation" type="text" class="inquiry-textarea" style="height: 32px; font-size: 12px;" value="${escapeHtml(node.citation || '')}" placeholder="如: Liu et al., 2023, p.4">
         </div>
+      ` : node.kind === 'source_code' ? `
+        <div style="margin-bottom: 10px;">
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">编程语言：</label>
+          <select id="node-edit-lang" class="inquiry-textarea" style="height: 32px; font-size: 12px; color: #38bdf8; font-weight: 600;">
+            <option value="c" ${(node.language || 'c') === 'c' ? 'selected' : ''}>C / C++</option>
+            <option value="assembly" ${(node.language || '') === 'assembly' ? 'selected' : ''}>x86-64 汇编 (Assembly)</option>
+            <option value="python" ${(node.language || '') === 'python' ? 'selected' : ''}>Python</option>
+            <option value="bash" ${(node.language || '') === 'bash' ? 'selected' : ''}>Shell / Bash</option>
+            <option value="rust" ${(node.language || '') === 'rust' ? 'selected' : ''}>Rust</option>
+            <option value="verilog" ${(node.language || '') === 'verilog' ? 'selected' : ''}>Verilog / 数字逻辑</option>
+            <option value="other" ${(node.language || '') === 'other' ? 'selected' : ''}>其它语言</option>
+          </select>
+        </div>
+        <div style="margin-bottom: 10px;">
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">源码正文：</label>
+          <textarea id="node-edit-code" class="inquiry-textarea" rows="7" style="font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 11.5px; white-space: pre; line-height: 1.45;" placeholder="输入或修改源码...">${escapeHtml(node.code || node.content || '')}</textarea>
+        </div>
+        <div>
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">源码出处标签：</label>
+          <input id="node-edit-citation" type="text" class="inquiry-textarea" style="height: 32px; font-size: 12px;" value="${escapeHtml(node.citation || '')}" placeholder="如: CS:APP3e 第 8.5.6 节 p.534">
+        </div>
+      ` : node.kind === 'hardware_probe' ? `
+        <div style="margin-bottom: 8px;">
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">断点源码位置：</label>
+          <input id="node-edit-location" type="text" class="inquiry-textarea" style="height: 32px; font-size: 12px;" value="${escapeHtml(node.location || '')}" placeholder="如: eval.c:28 (0x400da2)">
+        </div>
+        <div style="margin-bottom: 8px;">
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">断点调试备注：</label>
+          <input id="node-edit-notes" type="text" class="inquiry-textarea" style="height: 32px; font-size: 12px;" value="${escapeHtml(node.notes || '')}">
+        </div>
+        <div>
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">反汇编指令流：</label>
+          <textarea id="node-edit-disasm" class="inquiry-textarea" rows="4" style="font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 11px; white-space: pre;">${escapeHtml(node.disassembly || '')}</textarea>
+        </div>
       ` : `
         <div>
           <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">待解答问题 / 探索指令：</label>
@@ -559,18 +631,22 @@ function updateContextInspector() {
     </div>
 
     <!-- 拓扑分流统计 -->
-    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px;">
-      <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 8px; text-align: center;">
-        <div style="font-size: 17px; font-weight: 700; color: #34d399;">${partition.materials.length}</div>
-        <div style="font-size: 11px; color: #a7f3d0;">连入文献素材</div>
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 14px;">
+      <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 6px 4px; text-align: center;">
+        <div style="font-size: 16px; font-weight: 700; color: #34d399;">${partition.materials.length}</div>
+        <div style="font-size: 10px; color: #a7f3d0;">文献素材</div>
       </div>
-      <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px; padding: 8px; text-align: center;">
-        <div style="font-size: 17px; font-weight: 700; color: #818cf8;">${partition.references.length}</div>
-        <div style="font-size: 11px; color: #c7d2fe;">隔离引用块</div>
+      <div style="background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.25); border-radius: 8px; padding: 6px 4px; text-align: center;">
+        <div style="font-size: 16px; font-weight: 700; color: #67e8f9;">${(partition.codes ? partition.codes.length : 0) + (partition.probes ? partition.probes.length : 0)}</div>
+        <div style="font-size: 10px; color: #a5f3fc;">源码/探针</div>
       </div>
-      <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 8px; text-align: center;">
-        <div style="font-size: 17px; font-weight: 700; color: #60a5fa;">${partition.chainTurns.length}</div>
-        <div style="font-size: 11px; color: #bfdbfe;">主干对话轮数</div>
+      <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px; padding: 6px 4px; text-align: center;">
+        <div style="font-size: 16px; font-weight: 700; color: #818cf8;">${partition.references.length}</div>
+        <div style="font-size: 10px; color: #c7d2fe;">隔离引用</div>
+      </div>
+      <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 6px 4px; text-align: center;">
+        <div style="font-size: 16px; font-weight: 700; color: #60a5fa;">${partition.chainTurns.length}</div>
+        <div style="font-size: 10px; color: #bfdbfe;">主干轮数</div>
       </div>
     </div>
 
@@ -610,9 +686,66 @@ function updateContextInspector() {
   const titleInput = document.getElementById('node-edit-title');
   if (titleInput) {
     titleInput.oninput = (e) => {
-      node.title = e.target.value.trim() || '未命名课题';
-      const titleEl = document.querySelector(`.node[data-id="${node.id}"] .node-title`);
-      if (titleEl) titleEl.innerText = node.title;
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.title = e.target.value.trim() || '未命名课题';
+        const titleEl = document.querySelector(`.node[data-id="${node.id}"] .node-title`);
+        if (titleEl) titleEl.innerText = liveNode.title;
+      }
+      debouncedSave();
+    };
+  }
+
+  // 源码代码实时编辑联动
+  const codeInput = document.getElementById('node-edit-code');
+  if (codeInput) {
+    codeInput.oninput = (e) => {
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.code = e.target.value;
+        const pre = document.querySelector(`.node[data-id="${node.id}"] .code-pre`);
+        if (pre) pre.innerHTML = highlightCode(liveNode.code || '', liveNode.language || 'c');
+      }
+      debouncedSave();
+    };
+  }
+
+  // 源码编程语言实时切换联动
+  const langSelect = document.getElementById('node-edit-lang');
+  if (langSelect) {
+    langSelect.onchange = (e) => {
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.language = e.target.value;
+        const tag = document.querySelector(`.node[data-id="${node.id}"] .code-lang-tag`);
+        if (tag) tag.innerText = (liveNode.language || 'c').toUpperCase();
+        const pre = document.querySelector(`.node[data-id="${node.id}"] .code-pre`);
+        if (pre) pre.innerHTML = highlightCode(liveNode.code || '', liveNode.language || 'c');
+      }
+      debouncedSave();
+    };
+  }
+
+  // 硬件探针断点位置联动
+  const locInput = document.getElementById('node-edit-location');
+  if (locInput) {
+    locInput.oninput = (e) => {
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.location = e.target.value;
+        const locBadge = document.querySelector(`.node[data-id="${node.id}"] .probe-loc-badge`);
+        if (locBadge) locBadge.innerText = `📍 ${liveNode.location}`;
+      }
+      debouncedSave();
+    };
+  }
+
+  // 硬件探针断点备注联动
+  const notesInput = document.getElementById('node-edit-notes');
+  if (notesInput) {
+    notesInput.oninput = (e) => {
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) liveNode.notes = e.target.value;
       debouncedSave();
     };
   }
@@ -621,19 +754,22 @@ function updateContextInspector() {
   const questionInput = document.getElementById('node-edit-question');
   if (questionInput) {
     questionInput.oninput = (e) => {
-      node.question = e.target.value;
-      if (node.status === 'done') {
-        node.status = 'pending';
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.question = e.target.value;
+        if (liveNode.status === 'done') {
+          liveNode.status = 'pending';
+        }
+        const qEl = document.querySelector(`.node[data-id="${node.id}"] .card-question-text`);
+        if (qEl) qEl.innerHTML = renderMarkdown(liveNode.question || '<em>(点击右侧输入问题...)</em>');
+        // 实时重编译当前 Prompt 预估
+        const p = partitionContext(node.id, graph.nodes, graph.edges);
+        const c = compilePrompt(p);
+        const promptBox = document.querySelector('.prompt-preview-box');
+        if (promptBox) promptBox.innerText = c.fullText;
+        const tokenSpan = document.getElementById('prompt-token-count');
+        if (tokenSpan) tokenSpan.innerText = `${c.estimatedTokens} tokens`;
       }
-      const qEl = document.querySelector(`.node[data-id="${node.id}"] .card-question-text`);
-      if (qEl) qEl.innerHTML = renderMarkdown(node.question || '<em>(点击右侧输入问题...)</em>');
-      // 实时重编译当前 Prompt 预估
-      const p = partitionContext(node.id, graph.nodes, graph.edges);
-      const c = compilePrompt(p);
-      const promptBox = document.querySelector('.prompt-preview-box');
-      if (promptBox) promptBox.innerText = c.fullText;
-      const tokenSpan = document.getElementById('prompt-token-count');
-      if (tokenSpan) tokenSpan.innerText = `${c.estimatedTokens} tokens`;
       debouncedSave();
     };
   }
@@ -642,18 +778,24 @@ function updateContextInspector() {
   const excerptInput = document.getElementById('node-edit-excerpt');
   if (excerptInput) {
     excerptInput.oninput = (e) => {
-      node.excerpt = e.target.value;
-      const bq = document.querySelector(`.node[data-id="${node.id}"] .node-content blockquote`);
-      if (bq) bq.innerHTML = renderMarkdown(node.excerpt || '');
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.excerpt = e.target.value;
+        const bq = document.querySelector(`.node[data-id="${node.id}"] .node-content blockquote`);
+        if (bq) bq.innerHTML = renderMarkdown(liveNode.excerpt || '');
+      }
       debouncedSave();
     };
   }
   const citationInput = document.getElementById('node-edit-citation');
   if (citationInput) {
     citationInput.oninput = (e) => {
-      node.citation = e.target.value;
-      const chip = document.querySelector(`.node[data-id="${node.id}"] .citation-chip`);
-      if (chip) chip.innerText = `📖 ${node.citation}`;
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.citation = e.target.value;
+        const chip = document.querySelector(`.node[data-id="${node.id}"] .citation-chip`);
+        if (chip) chip.innerText = `📖 ${liveNode.citation}`;
+      }
       debouncedSave();
     };
   }
@@ -2535,6 +2677,91 @@ function setupEventListeners() {
   const btnAddMaterial = document.getElementById('btn-add-material');
   if (btnAddMaterial) btnAddMaterial.onclick = () => openDrawer('reader');
 
+  const btnAddCode = document.getElementById('btn-add-code');
+  if (btnAddCode) btnAddCode.onclick = () => openCodeModal();
+
+  const btnCloseCodeModal = document.getElementById('btn-close-code-modal');
+  if (btnCloseCodeModal) btnCloseCodeModal.onclick = () => closeCodeModal();
+
+  const btnCancelCodeModal = document.getElementById('btn-cancel-code-modal');
+  if (btnCancelCodeModal) btnCancelCodeModal.onclick = () => closeCodeModal();
+
+  const btnPasteClipboard = document.getElementById('btn-paste-clipboard');
+  if (btnPasteClipboard) {
+    btnPasteClipboard.onclick = async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        const contentInput = document.getElementById('code-modal-content');
+        if (contentInput && text) {
+          contentInput.value = text;
+          autoDetectCodeMeta(text);
+          updateStatus("已从剪贴板粘贴源码！");
+        }
+      } catch (err) {
+        alert("无法直接访问系统剪贴板，请使用 Ctrl+V 手动粘贴。");
+      }
+    };
+  }
+
+  const btnSubmitCodeModal = document.getElementById('btn-submit-code-modal');
+  if (btnSubmitCodeModal) {
+    btnSubmitCodeModal.onclick = () => {
+      const title = (document.getElementById('code-modal-title')?.value || '').trim();
+      const lang = (document.getElementById('code-modal-lang')?.value || 'c').trim();
+      const citation = (document.getElementById('code-modal-citation')?.value || '').trim();
+      const content = (document.getElementById('code-modal-content')?.value || '').trim();
+      const targetId = document.getElementById('code-modal-target-node')?.value;
+
+      if (!content) {
+        alert("请在输入框中填入或粘贴源码内容！");
+        return;
+      }
+
+      const newId = `n_code_${Date.now()}`;
+      const screenCenter = screenToWorld(window.innerWidth / 3, window.innerHeight / 2.5);
+
+      let x = Math.max(40, screenCenter.x - 180);
+      let y = Math.max(40, screenCenter.y - 100);
+
+      const targetNode = graph.nodes.find(n => n.id === targetId);
+      if (targetNode) {
+        x = Math.max(40, targetNode.x - 420);
+        y = targetNode.y;
+      }
+
+      const newNode = {
+        id: newId,
+        kind: 'source_code',
+        title: title || '源码公理实证片段',
+        language: lang,
+        code: content,
+        citation: citation,
+        status: 'idle',
+        x,
+        y,
+        createdAt: Date.now()
+      };
+
+      graph.nodes.push(newNode);
+
+      if (targetId && targetNode) {
+        graph.edges.push({
+          id: `e_${newId}_${targetId}`,
+          source: newId,
+          target: targetId,
+          kind: 'solid'
+        });
+      }
+
+      saveGraph();
+      renderNodes();
+      requestAnimationFrame(() => renderEdges());
+      selectNode(newId);
+      closeCodeModal();
+      updateStatus(`已创建源码实证卡片 #${newId}！`);
+    };
+  }
+
   const btnToggleReader = document.getElementById('btn-toggle-reader');
   if (btnToggleReader) btnToggleReader.onclick = () => openDrawer('reader');
 
@@ -3019,14 +3246,88 @@ function setupEventListeners() {
       e.preventDefault();
       toggleSidebar();
     }
+    if (e.altKey && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault();
+      openCodeModal();
+    }
     if (e.key === 'Escape') {
       const sidebar = document.getElementById('sidebar-sessions');
       if (sidebar && sidebar.classList.contains('open')) closeSidebar();
       if (cardModal && cardModal.style.display === 'flex') cardModal.style.display = 'none';
       if (inquiryModal && inquiryModal.style.display === 'flex') inquiryModal.style.display = 'none';
       if (settingsModal && settingsModal.style.display === 'flex') settingsModal.style.display = 'none';
+      const codeModal = document.getElementById('code-modal');
+      if (codeModal && codeModal.style.display === 'flex') closeCodeModal();
     }
   });
+}
+
+function openCodeModal() {
+  const modal = document.getElementById('code-modal');
+  if (!modal) return;
+  const titleInput = document.getElementById('code-modal-title');
+  const citationInput = document.getElementById('code-modal-citation');
+  const contentInput = document.getElementById('code-modal-content');
+  const targetSelect = document.getElementById('code-modal-target-node');
+  
+  if (titleInput) titleInput.value = '';
+  if (citationInput) citationInput.value = '';
+  if (contentInput) contentInput.value = '';
+
+  if (targetSelect) {
+    targetSelect.innerHTML = '<option value="">(暂不连线，作为独立公理实证卡片入图)</option>';
+    graph.nodes.forEach(n => {
+      if (n.kind === 'question' || n.kind === 'conclusion') {
+        const opt = document.createElement('option');
+        opt.value = n.id;
+        opt.innerText = `${n.kind === 'question' ? '❓' : '💡'} ${n.title || n.question || n.id}`;
+        if (n.id === selectedNodeId) opt.selected = true;
+        targetSelect.appendChild(opt);
+      }
+    });
+  }
+
+  // 尝试自动读取系统剪贴板
+  if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+    navigator.clipboard.readText().then(clipText => {
+      if (clipText && clipText.trim() && contentInput && !contentInput.value) {
+        contentInput.value = clipText.trim();
+        autoDetectCodeMeta(clipText.trim());
+      }
+    }).catch(() => {});
+  }
+
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    if (contentInput && contentInput.value) {
+      if (titleInput) titleInput.focus();
+    } else if (contentInput) {
+      contentInput.focus();
+    }
+  }, 60);
+}
+
+function closeCodeModal() {
+  const modal = document.getElementById('code-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function autoDetectCodeMeta(text) {
+  const titleInput = document.getElementById('code-modal-title');
+  const citationInput = document.getElementById('code-modal-citation');
+  const langSelect = document.getElementById('code-modal-lang');
+
+  if (/void\s+eval\b|fork\(\)|sigprocmask|setpgid/i.test(text)) {
+    if (titleInput && !titleInput.value) titleInput.value = 'CS:APP eval() 进程组与信号掩码实现';
+    if (citationInput && !citationInput.value) citationInput.value = 'CS:APP3e 第 8.5.6 节 p.534 (csapp/eval.c)';
+    if (langSelect) langSelect.value = 'c';
+  } else if (/%rax|movq|pushq|callq|\$0x/i.test(text)) {
+    if (titleInput && !titleInput.value) titleInput.value = 'x86-64 汇编指令流片段';
+    if (langSelect) langSelect.value = 'assembly';
+  } else if (/def\s+\w+\(|import\s+\w+/i.test(text)) {
+    if (titleInput && !titleInput.value) titleInput.value = 'Python 算法实现片段';
+    if (langSelect) langSelect.value = 'python';
+  }
 }
 
 // 初始化划词快捷工具栏 (划线复制、追问概念、存为实证)
@@ -3239,7 +3540,9 @@ function openCardFullscreen(node) {
   const kindNames = {
     material: '文献实证',
     question: '探索课题',
-    conclusion: '综合结论'
+    conclusion: '综合结论',
+    source_code: '源码实证',
+    hardware_probe: '硬件探针'
   };
 
   const badgeEl = document.getElementById('modal-card-badge');
@@ -3256,6 +3559,40 @@ function openCardFullscreen(node) {
         ${renderMarkdown(node.excerpt || node.content || '')}
       </blockquote>
       ${node.citation ? `<div class="citation-chip" style="margin-top: 16px; font-size: 12.5px; padding: 4px 12px;">📖 证据出处: ${escapeHtml(node.citation)}</div>` : ''}
+    `;
+  } else if (node.kind === 'source_code') {
+    bodyEl.innerHTML = `
+      <div class="code-block-wrapper" style="margin-top: 0;">
+        <div class="code-block-header">
+          <span class="code-lang-tag">${escapeHtml((node.language || 'c').toUpperCase())}</span>
+          <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">📋 复制代码片段</button>
+        </div>
+        <pre class="code-pre" style="max-height: 480px; font-size: 13px;">${highlightCode(node.code || node.content || '', node.language || 'c')}</pre>
+      </div>
+      ${node.citation ? `<div class="citation-chip" style="margin-top: 16px; font-size: 12.5px; padding: 4px 12px;">📖 源码工程出处: ${escapeHtml(node.citation)}</div>` : ''}
+    `;
+  } else if (node.kind === 'hardware_probe') {
+    bodyEl.innerHTML = `
+      ${node.location ? `<div class="probe-loc-badge" style="font-size: 13px; padding: 4px 10px; margin-bottom: 14px;">📍 断点源码位置: ${escapeHtml(node.location)}</div>` : ''}
+      <div style="margin-bottom: 14px;">
+        <div class="probe-grid-label" style="font-size: 12px; margin-bottom: 6px;">16 个通用寄存器物理状态 (x86-64)</div>
+        <div class="reg-grid" style="grid-template-columns: repeat(4, 1fr); padding: 10px; gap: 8px;">
+          ${renderRegistersHtml(node.registers)}
+        </div>
+      </div>
+      ${node.disassembly ? `
+        <div style="margin-bottom: 14px;">
+          <div class="probe-grid-label" style="font-size: 12px; margin-bottom: 6px;">反汇编指令流 ($pc)</div>
+          <div class="disasm-box" style="max-height: 220px; font-size: 12px;">${formatDisassemblyHtml(node.disassembly)}</div>
+        </div>
+      ` : ''}
+      ${node.stack ? `
+        <div style="margin-bottom: 14px;">
+          <div class="probe-grid-label" style="font-size: 12px; margin-bottom: 6px;">栈顶物理内存 Dump ($rsp)</div>
+          <pre class="code-pre" style="max-height: 180px; font-size: 11.5px; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 8px;">${escapeHtml(node.stack)}</pre>
+        </div>
+      ` : ''}
+      ${node.notes ? `<div style="font-size: 12.5px; color: #94a3b8; font-style: italic; margin-top: 10px;">💬 调试断点备注: ${escapeHtml(node.notes)}</div>` : ''}
     `;
   } else {
     bodyEl.innerHTML = `
@@ -3287,6 +3624,8 @@ function openCardFullscreen(node) {
     const fullText = `# ${node.title || node.id}\n\n` +
       (node.question ? `**课题问题**: ${node.question}\n\n` : '') +
       (node.excerpt ? `> ${node.excerpt}\n\n出处: ${node.citation || ''}\n\n` : '') +
+      (node.code ? `\`\`\`${node.language || 'c'}\n${node.code}\n\`\`\`\n\n出处: ${node.citation || ''}\n\n` : '') +
+      (node.disassembly ? `### 反汇编\n\`\`\`assembly\n${node.disassembly}\n\`\`\`\n\n` : '') +
       (node.response ? `### 推演结论\n\n${node.response}` : '');
     navigator.clipboard.writeText(fullText);
     alert("已将卡片 Markdown 全文复制到剪贴板！");
@@ -3425,13 +3764,158 @@ function updateStatus(text) {
   if (el) el.innerText = text;
 }
 
+/**
+ * 轻量零构建原生语法高亮器
+ * 覆盖 C/C++, x86-64 汇编, Python, Bash, JSON
+ */
+function highlightCode(code, lang = 'c') {
+  if (!code) return '';
+  const safeLang = (lang || 'c').toLowerCase().trim();
+  let str = escapeHtml(code);
+
+  if (safeLang === 'c' || safeLang === 'cpp' || safeLang === 'c++') {
+    const comments = [];
+    str = str.replace(/(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/g, (m) => {
+      const id = `___COMM${comments.length}___`;
+      comments.push(`<span class="tok-comm">${m}</span>`);
+      return id;
+    });
+
+    const strings = [];
+    str = str.replace(/("(\\"|[^"])*?"|'(\\'|[^'])*?')/g, (m) => {
+      const id = `___STR${strings.length}___`;
+      strings.push(`<span class="tok-str">${m}</span>`);
+      return id;
+    });
+
+    str = str.replace(/(#\s*(?:include|define|undef|ifdef|ifndef|if|else|elif|endif|pragma)[^\n]*)/g, '<span class="tok-macro">$1</span>');
+
+    const keywords = /\b(return|if|else|switch|case|default|while|do|for|break|continue|goto|sizeof)\b/g;
+    str = str.replace(keywords, '<span class="tok-kw">$1</span>');
+
+    const types = /\b(int|char|void|pid_t|sigset_t|size_t|ssize_t|bool|float|double|long|short|unsigned|signed|struct|union|enum|typedef|const|static|volatile|auto|register|uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t)\b/g;
+    str = str.replace(types, '<span class="tok-type">$1</span>');
+
+    const sysCalls = /\b(sigprocmask|Sigprocmask|sigemptyset|sigfillset|sigaddset|sigdelset|sigismember|fork|Fork|execve|Execve|waitpid|Waitpid|kill|Kill|setpgid|Setpgid|signal|Signal|pause|sleep|alarm|printf|fprintf|sprintf|malloc|free|exit)\b/g;
+    str = str.replace(sysCalls, '<span class="tok-fn">$1</span>');
+
+    str = str.replace(/\b(0x[0-9a-fA-F]+|\d+)\b/g, '<span class="tok-num">$1</span>');
+
+    strings.forEach((s, i) => { str = str.replace(`___STR${i}___`, s); });
+    comments.forEach((c, i) => { str = str.replace(`___COMM${i}___`, c); });
+    return str;
+  } else if (safeLang === 'assembly' || safeLang === 'asm' || safeLang === 'x86' || safeLang === 'x86_64') {
+    str = str.replace(/\b(movq|movl|movw|movb|pushq|popq|callq|call|retq|ret|jmp|je|jne|js|jns|jg|jge|jl|jle|ja|jae|jb|jbe|test|testq|testl|cmp|cmpq|cmpl|addq|addl|subq|subl|leaq|leal|xorq|xorl|andq|andl|orq|orl|nop|syscall|int)\b/gi, '<span class="tok-kw">$1</span>');
+    str = str.replace(/(%[a-z0-9]+)/gi, '<span class="tok-reg">$1</span>');
+    str = str.replace(/(\$(?:0x[0-9a-fA-F]+|\d+))/g, '<span class="tok-num">$1</span>');
+    str = str.replace(/(#[^\n]*|\/\/[^\n]*)/g, '<span class="tok-comm">$1</span>');
+    return str;
+  } else if (safeLang === 'python' || safeLang === 'py') {
+    str = str.replace(/(#[^\n]*)/g, '<span class="tok-comm">$1</span>');
+    str = str.replace(/("(\\"|[^"])*?"|'(\\'|[^'])*?')/g, '<span class="tok-str">$1</span>');
+    str = str.replace(/\b(def|class|import|from|return|if|elif|else|while|for|in|try|except|finally|with|as|pass|break|continue|lambda|yield|async|await|None|True|False|is|not|and|or)\b/g, '<span class="tok-kw">$1</span>');
+    str = str.replace(/\b(0x[0-9a-fA-F]+|\d+)\b/g, '<span class="tok-num">$1</span>');
+    return str;
+  } else if (safeLang === 'bash' || safeLang === 'sh' || safeLang === 'shell') {
+    str = str.replace(/(#[^\n]*)/g, '<span class="tok-comm">$1</span>');
+    str = str.replace(/("(\\"|[^"])*?"|'(\\'|[^'])*?')/g, '<span class="tok-str">$1</span>');
+    str = str.replace(/\b(echo|cd|ls|export|source|if|then|fi|elif|else|for|in|do|done|while|case|esac|exit|set|shift)\b/g, '<span class="tok-kw">$1</span>');
+    return str;
+  }
+
+  return str;
+}
+
+window.copyRawCodeBlock = function(btn, event) {
+  if (event) event.stopPropagation();
+  const wrapper = btn.closest('.code-block-wrapper');
+  if (!wrapper) return;
+  const stash = wrapper.querySelector('.raw-code-stash');
+  const text = stash ? stash.value : wrapper.querySelector('.code-pre').innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const old = btn.innerText;
+    btn.innerText = '✓ 已复制';
+    btn.style.color = '#34d399';
+    setTimeout(() => {
+      btn.innerText = old;
+      btn.style.color = '';
+    }, 1500);
+  }).catch(() => {
+    alert("复制失败，请手动选择复制。");
+  });
+};
+
+window.copySnippetText = function(nodeId, event) {
+  if (event) event.stopPropagation();
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  const text = node.code || node.content || '';
+  navigator.clipboard.writeText(text).then(() => {
+    updateStatus("已复制源码片段至剪贴板！");
+  }).catch(() => {
+    alert("复制失败，请手动选择复制。");
+  });
+};
+
+function renderRegistersHtml(regs) {
+  if (!regs) return '<div style="color: #64748b; font-size: 10px; grid-column: span 2;">(无寄存器数据)</div>';
+  let entries = [];
+  if (typeof regs === 'object' && !Array.isArray(regs)) {
+    entries = Object.entries(regs);
+  } else if (typeof regs === 'string') {
+    const lines = regs.split(/\r?\n|\s{2,}/);
+    lines.forEach(l => {
+      const match = l.match(/([%a-zA-Z0-9_]+)[:=\s]+(0x[0-9a-fA-F]+|\d+)/);
+      if (match) entries.push([match[1], match[2]]);
+    });
+  }
+  if (entries.length === 0) {
+    return `<div style="color: #94a3b8; font-size: 10px; grid-column: span 2;">${escapeHtml(String(regs))}</div>`;
+  }
+  return entries.slice(0, 16).map(([name, val]) => `
+    <div class="reg-item">
+      <span class="reg-name">${escapeHtml(name.replace(/^%/, ''))}</span>
+      <span class="reg-val">${escapeHtml(String(val))}</span>
+    </div>
+  `).join('');
+}
+
+function formatDisassemblyHtml(disasm) {
+  if (!disasm) return '';
+  const lines = disasm.split('\n');
+  return lines.map(line => {
+    const isTarget = line.includes('=>') || line.trim().startsWith('->');
+    const safeLine = escapeHtml(line);
+    if (isTarget) {
+      return `<span class="disasm-active-line">${safeLine}</span>`;
+    }
+    return safeLine;
+  }).join('\n');
+}
+
 function renderMarkdown(text) {
   if (!text) return '';
 
+  const codeBlocks = [];
+  const inlineCodes = [];
   const mathTokens = [];
 
-  // 1. 提取并预渲染块级公式: $$...$$ 或 \[...\]
-  let processed = text
+  // 1. 优先提取并隔离块级代码: ```lang\n...\n``` (防止 * / _ / $ 误转)
+  let processed = text.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
+    const id = `@@FENCEDCODE_${codeBlocks.length}@@`;
+    codeBlocks.push({ lang: lang || 'c', code });
+    return id;
+  });
+
+  // 2. 提取并隔离行内代码: `...`
+  processed = processed.replace(/`([^`\n]+?)`/g, (match, code) => {
+    const id = `@@INLINECODE_${inlineCodes.length}@@`;
+    inlineCodes.push(code);
+    return id;
+  });
+
+  // 3. 提取并预渲染块级公式: $$...$$ 或 \[...\]
+  processed = processed
     .replace(/\$\$([\s\S]+?)\$\$/g, (match, expr) => {
       const id = `@@KATEXDISP${mathTokens.length}@@`;
       let rendered = match;
@@ -3459,7 +3943,7 @@ function renderMarkdown(text) {
       return id;
     });
 
-  // 2. 提取并预渲染行内公式: $...$ 或 \(...\)
+  // 4. 提取并预渲染行内公式: $...$ 或 \(...\)
   processed = processed
     .replace(/\\\(([\s\S]+?)\\\)/g, (match, expr) => {
       const id = `@@KATEXINL${mathTokens.length}@@`;
@@ -3475,7 +3959,6 @@ function renderMarkdown(text) {
       return id;
     })
     .replace(/(?<!\\)\$([^\$\n]+?)(?<!\\)\$/g, (match, expr) => {
-      // 过滤纯货币符号（如 $100）
       if (/^\s*\d+([.,]\d+)?\s*$/.test(expr)) return match;
       const id = `@@KATEXINL${mathTokens.length}@@`;
       let rendered = match;
@@ -3490,7 +3973,7 @@ function renderMarkdown(text) {
       return id;
     });
 
-  // 3. 执行 marked Markdown 解析（@@...@@ 绝不会被 marked 误判为粗体或斜体）
+  // 5. 执行 marked Markdown 解析（@@...@@ 绝不会被 marked 误判为粗体、斜体或指针转义）
   let html = processed;
   if (window.marked && typeof window.marked.parse === 'function') {
     try {
@@ -3506,7 +3989,32 @@ function renderMarkdown(text) {
     html = escapeHtml(processed).replace(/\n/g, '<br/>');
   }
 
-  // 4. 将预渲染好的 KaTeX 纯净 HTML 节点安全还原回流
+  // 6. 还原块级代码与语法高亮
+  codeBlocks.forEach(({ lang, code }, idx) => {
+    const id = `@@FENCEDCODE_${idx}@@`;
+    const snippetId = `snippet_${Date.now()}_${idx}`;
+    const highlighted = highlightCode(code.trim(), lang);
+    const codeHtml = `
+      <div class="code-block-wrapper" id="${snippetId}">
+        <div class="code-block-header">
+          <span class="code-lang-tag">${escapeHtml((lang || 'code').toUpperCase())}</span>
+          <button class="code-copy-btn" onclick="copyRawCodeBlock(this, event)">📋 复制</button>
+        </div>
+        <pre class="code-pre"><code>${highlighted}</code></pre>
+        <textarea class="raw-code-stash" style="display: none;">${escapeHtml(code)}</textarea>
+      </div>
+    `;
+    html = html.split(id).join(codeHtml);
+  });
+
+  // 7. 还原行内代码
+  inlineCodes.forEach((code, idx) => {
+    const id = `@@INLINECODE_${idx}@@`;
+    const inlineHtml = `<code class="inline-code-badge">${escapeHtml(code)}</code>`;
+    html = html.split(id).join(inlineHtml);
+  });
+
+  // 8. 将预渲染好的 KaTeX 纯净 HTML 节点安全还原回流
   mathTokens.forEach(({ id, html: mathHtml }) => {
     html = html.split(id).join(mathHtml);
   });
