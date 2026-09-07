@@ -41,7 +41,7 @@
       "stack": "0x7fffffffe1a0:  0x0000000000401200  0x00007fffffffe2b0\n0x7fffffffe1b0:  0x0000000000000000  0x0000000000000002\n0x7fffffffe1c0:  0x0000000000000000  0x00007ffff7fa5d80\n0x7fffffffe1d0:  0x00007fffffffe240  0x0000000000400da2",
       "notes": "fork() 返回子进程 (rax=0)，子进程即将恢复原信号掩码 prev_one 并执行 setpgid(0, 0)",
       "status": "idle",
-      "x": 780,
+      "x": 829.6145150637606,
       "y": 258,
       "createdAt": 1788770898651,
       "isDisasmWrap": true,
@@ -132,6 +132,12 @@
     {
       "id": "e_1788773473437",
       "source": "n_code_1788771579095",
+      "target": "n_probe_1788770898651",
+      "kind": "solid"
+    },
+    {
+      "id": "e_1788774413088",
+      "source": "n_probe_1788771355173",
       "target": "n_probe_1788770898651",
       "kind": "solid"
     }

@@ -400,33 +400,13 @@ void eval(char *cmdline) {
         <div style="margin-bottom: 12px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
             <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">🧠 主推理模型 (Reasoning Model)</label>
-            <span style="font-size: 11px; color: #34d399;" id="cfg-model-badge">国产 & 国际自由调度</span>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button type="button" id="btn-fetch-models" class="btn" style="padding: 1px 7px; font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 4px;" title="向当前接口查询 /v1/models 获取该服务商在线可用全部模型">🔄 探测在线模型</button>
+              <span style="font-size: 11px; color: #34d399;" id="cfg-model-badge">服务商适配</span>
+            </div>
           </div>
           <select id="cfg-model-select" class="inquiry-textarea" style="height: 40px; cursor: pointer; color: #34d399; font-weight: 600; font-size: 12.5px;">
-            <optgroup label="🇨🇳 国产顶尖推理与通识模型 (DeepSeek & 通义千问)">
-              <option value="deepseek-ai/DeepSeek-V4-Pro" selected>deepseek-ai/DeepSeek-V4-Pro (深度推演旗舰)</option>
-              <option value="deepseek-ai/DeepSeek-R1">deepseek-ai/DeepSeek-R1 (硅基流动 · 强逻辑)</option>
-              <option value="deepseek-ai/DeepSeek-V3">deepseek-ai/DeepSeek-V3 (硅基流动 · 高速通用)</option>
-              <option value="deepseek-reasoner">deepseek-reasoner (DeepSeek 官方深度思考)</option>
-              <option value="deepseek-chat">deepseek-chat (DeepSeek 官方通用高速)</option>
-              <option value="qwen3.8-max">qwen3.8-max (阿里百炼 · 最新学术旗舰)</option>
-              <option value="qwen-max">qwen-max (阿里百炼 · 复杂学术长文)</option>
-              <option value="qwen-plus">qwen-plus (阿里百炼 · 高性价比)</option>
-            </optgroup>
-            <optgroup label="🌐 国际前沿与多模态模型 (Google / Anthropic / OpenAI)">
-              <option value="gemini-3.8-flash-high">gemini-3.8-flash-high (Google 深度思考)</option>
-              <option value="gemini-3.8-flash-medium">gemini-3.8-flash-medium</option>
-              <option value="gemini-3.8-flash-low">gemini-3.8-flash-low</option>
-              <option value="gemini-2.5-pro">gemini-2.5-pro (Google 综合旗舰)</option>
-              <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet-20241022</option>
-              <option value="claude-opus-4-5-thinking">claude-opus-4-5-thinking</option>
-              <option value="gpt-4o">gpt-4o (OpenAI 全模态)</option>
-              <option value="o1">o1 (OpenAI 深度推理)</option>
-              <option value="o3-mini">o3-mini (OpenAI 极速推理)</option>
-            </optgroup>
-            <optgroup label="✏️ 自定义输入">
-              <option value="__custom__">自定义模型名称...</option>
-            </optgroup>
+            <!-- 由 app.js 根据所选服务商动态渲染 -->
           </select>
         </div>
 
@@ -440,32 +420,27 @@ void eval(char *cmdline) {
         <div style="margin-bottom: 14px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
             <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">👁️ 多模态视觉模型 (Vision Model · 截框公式/光路解析)</label>
-            <span style="font-size: 10.5px; color: #818cf8;">双引擎分发守卫</span>
+            <span style="font-size: 10.5px; color: #818cf8;" id="cfg-vision-badge">双引擎分发守卫</span>
           </div>
           <select id="cfg-vision-model-select" class="inquiry-textarea" style="height: 40px; cursor: pointer; color: #818cf8; font-size: 12px;">
-            <option value="">✨ 智能自动路由 (根据主模型与服务商自适应)</option>
-            <optgroup label="🇨🇳 国产多模态视觉 (公式/光路/插图解析)">
-              <option value="Qwen/Qwen2.5-VL-72B-Instruct">Qwen/Qwen2.5-VL-72B-Instruct (硅基流动)</option>
-              <option value="qwen-vl-max">qwen-vl-max (阿里百炼 · 旗舰视觉)</option>
-              <option value="qwen-vl-plus">qwen-vl-plus (阿里百炼 · 极速视觉)</option>
-              <option value="Pro/Qwen/Qwen2.5-VL-7B-Instruct">Pro/Qwen/Qwen2.5-VL-7B-Instruct (极速轻量)</option>
-            </optgroup>
-            <optgroup label="🌐 国际多模态视觉">
-              <option value="gemini-3.8-flash-high">gemini-3.8-flash-high (高精度 LaTeX 公式 OCR)</option>
-              <option value="gemini-2.5-pro">gemini-2.5-pro (深度图表解析)</option>
-              <option value="gpt-4o">gpt-4o (OpenAI 视觉)</option>
-              <option value="gpt-4o-mini">gpt-4o-mini (轻量视觉)</option>
-            </optgroup>
+            <!-- 由 app.js 根据所选服务商动态渲染 -->
           </select>
         </div>
 
         <!-- 推理温度与高级设置 -->
-        <div class="temperature-config-bar" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color);">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span class="temperature-label" style="font-size: 12px;">🌡️ 推理采样温度 (Temperature):</span>
-            <span id="cfg-temp-value" class="temperature-value" style="font-size: 12px; font-weight: bold;">0.3</span>
+        <div class="temperature-config-bar" style="margin-bottom: 14px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(255,255,255,0.02);">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="temperature-label" style="font-size: 12px;">🌡️ 推理采样温度 (Temperature):</span>
+              <span id="cfg-temp-value" class="temperature-value" style="font-size: 12px; font-weight: bold; color: #818cf8;">0.3</span>
+            </div>
+            <span id="cfg-temp-hint" style="font-size: 11px; color: #34d399;">⚖️ 均衡学术论证 (默认推荐)</span>
           </div>
-          <input id="cfg-temperature" type="range" min="0" max="1" step="0.05" value="0.3" style="width: 140px; accent-color: #6366f1; cursor: pointer;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 10px; color: #64748b;">0.0 (严密确定)</span>
+            <input id="cfg-temperature" type="range" min="0" max="1" step="0.05" value="0.3" style="flex: 1; accent-color: #6366f1; cursor: pointer;">
+            <span style="font-size: 10px; color: #64748b;">1.0 (发散探索)</span>
+          </div>
         </div>
 
         <!-- 连通性测试反馈通知条 -->

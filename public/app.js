@@ -2833,6 +2833,28 @@ function setupEventListeners() {
   // 模型与接口调度设置中心 (双引擎 & 服务商预设)
   // ==========================================
   const PROVIDER_PRESETS = {
+    localproxy: {
+      name: '本地反代',
+      api_base: 'http://127.0.0.1:8045/v1',
+      model: 'gemini-3.8-flash-high',
+      vision_model: 'gemini-3.8-flash-high',
+      hint: '服务商：本地 Antigravity 代理 · 自动探测本地端口，无需配置第三方 Key',
+      linkText: '',
+      linkUrl: '#',
+      defaultKey: 'sk-antigravity',
+      models: [
+        { id: 'gemini-3.8-flash-high', name: 'gemini-3.8-flash-high (Google 深度思考 · 推荐)' },
+        { id: 'gemini-2.5-pro', name: 'gemini-2.5-pro (长上下文/深度逻辑)' },
+        { id: 'gemini-2.5-flash', name: 'gemini-2.5-flash (极速响应)' },
+        { id: 'claude-3-5-sonnet-20241022', name: 'claude-3-5-sonnet (代码与系统架构)' },
+        { id: 'gpt-4o', name: 'gpt-4o (OpenAI 全模态旗舰)' }
+      ],
+      vision_models: [
+        { id: 'gemini-3.8-flash-high', name: 'gemini-3.8-flash-high (高精度 LaTeX 公式 OCR · 推荐)' },
+        { id: 'gemini-2.5-pro', name: 'gemini-2.5-pro (深度图表解析)' },
+        { id: 'gpt-4o', name: 'gpt-4o (视觉解析)' }
+      ]
+    },
     siliconflow: {
       name: '硅基流动',
       api_base: 'https://api.siliconflow.cn/v1',
@@ -2841,7 +2863,17 @@ function setupEventListeners() {
       hint: '服务商：硅基流动 · 适用 DeepSeek-V4 Pro (推理) + Qwen2.5-VL-72B (视觉)',
       linkText: 'cloud.siliconflow.cn ↗',
       linkUrl: 'https://cloud.siliconflow.cn/account/ak',
-      defaultKey: ''
+      defaultKey: '',
+      models: [
+        { id: 'deepseek-ai/DeepSeek-V4-Pro', name: 'deepseek-ai/DeepSeek-V4-Pro (官方首选推演)' },
+        { id: 'deepseek-ai/DeepSeek-R1', name: 'deepseek-ai/DeepSeek-R1 (深度长思维链)' },
+        { id: 'deepseek-ai/DeepSeek-V3', name: 'deepseek-ai/DeepSeek-V3 (极速通用推理)' },
+        { id: 'Qwen/Qwen2.5-72B-Instruct', name: 'Qwen/Qwen2.5-72B-Instruct (通义千问开源旗舰)' }
+      ],
+      vision_models: [
+        { id: 'Qwen/Qwen2.5-VL-72B-Instruct', name: 'Qwen/Qwen2.5-VL-72B-Instruct (公式/插图解析 · 推荐)' },
+        { id: 'Pro/Qwen/Qwen2.5-VL-7B-Instruct', name: 'Pro/Qwen/Qwen2.5-VL-7B-Instruct (极速轻量)' }
+      ]
     },
     dashscope: {
       name: '阿里百炼',
@@ -2851,7 +2883,18 @@ function setupEventListeners() {
       hint: '服务商：阿里百炼 · 适用 Qwen3.8-Max (推理) + qwen-vl-max (视觉)',
       linkText: 'bailian.console.aliyun.com ↗',
       linkUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
-      defaultKey: ''
+      defaultKey: '',
+      models: [
+        { id: 'qwen3.8-max', name: 'qwen3.8-max (百炼最新学术旗舰)' },
+        { id: 'qwen-max', name: 'qwen-max (复杂学术长文)' },
+        { id: 'qwen-plus', name: 'qwen-plus (高性价比加速)' },
+        { id: 'deepseek-r1', name: 'deepseek-r1 (百炼托管 R1)' },
+        { id: 'deepseek-v3', name: 'deepseek-v3 (百炼托管 V3)' }
+      ],
+      vision_models: [
+        { id: 'qwen-vl-max', name: 'qwen-vl-max (旗舰视觉 OCR · 推荐)' },
+        { id: 'qwen-vl-plus', name: 'qwen-vl-plus (极速视觉)' }
+      ]
     },
     deepseek: {
       name: 'DeepSeek 官方',
@@ -2861,17 +2904,14 @@ function setupEventListeners() {
       hint: '服务商：DeepSeek 开放平台 · 适用 deepseek-chat / deepseek-reasoner',
       linkText: 'platform.deepseek.com ↗',
       linkUrl: 'https://platform.deepseek.com/api_keys',
-      defaultKey: ''
-    },
-    localproxy: {
-      name: '本地反代',
-      api_base: 'http://127.0.0.1:8046/v1',
-      model: 'gemini-3.8-flash-high',
-      vision_model: 'gemini-3.8-flash-high',
-      hint: '服务商：本地 Antigravity 代理 · 走本地端口，无需配置第三方 Key',
-      linkText: '',
-      linkUrl: '#',
-      defaultKey: 'sk-antigravity'
+      defaultKey: '',
+      models: [
+        { id: 'deepseek-chat', name: 'deepseek-chat (DeepSeek-V3 极速通用)' },
+        { id: 'deepseek-reasoner', name: 'deepseek-reasoner (DeepSeek-R1 深度长思维链)' }
+      ],
+      vision_models: [
+        { id: '', name: '✨ 自动回退 (DeepSeek 官方无多模态，由主引擎/本地代理处理)' }
+      ]
     },
     openai: {
       name: 'OpenAI 官方',
@@ -2881,7 +2921,17 @@ function setupEventListeners() {
       hint: '服务商：OpenAI 官方 · 适用 GPT-4o / o1 / o3-mini',
       linkText: 'platform.openai.com ↗',
       linkUrl: 'https://platform.openai.com/api-keys',
-      defaultKey: ''
+      defaultKey: '',
+      models: [
+        { id: 'gpt-4o', name: 'gpt-4o (全能旗舰 · 推荐)' },
+        { id: 'gpt-4o-mini', name: 'gpt-4o-mini (轻量极速)' },
+        { id: 'o1', name: 'o1 (长思维链高难度推理)' },
+        { id: 'o3-mini', name: 'o3-mini (数理逻辑极速推理)' }
+      ],
+      vision_models: [
+        { id: 'gpt-4o', name: 'gpt-4o (高精度视觉 OCR · 推荐)' },
+        { id: 'gpt-4o-mini', name: 'gpt-4o-mini (轻量视觉)' }
+      ]
     }
   };
 
@@ -2900,7 +2950,81 @@ function setupEventListeners() {
     localStorage.setItem('axiomflow_provider_keys', JSON.stringify(keys));
   }
 
-  let currentActiveProvider = 'siliconflow';
+  let currentActiveProvider = 'localproxy';
+
+  // 专属服务商模型下拉渲染引擎
+  function populateModelOptions(pKey, targetModel, targetVision, fetchedOnlineModels = null) {
+    const preset = PROVIDER_PRESETS[pKey] || PROVIDER_PRESETS.localproxy;
+    const modelSelect = document.getElementById('cfg-model-select');
+    const visionSelect = document.getElementById('cfg-vision-model-select');
+    const modelBadge = document.getElementById('cfg-model-badge');
+    const customBox = document.getElementById('cfg-custom-model-box');
+    const customInput = document.getElementById('cfg-custom-model-input');
+
+    if (modelBadge) {
+      modelBadge.innerText = `${preset.name} 专属模型库`;
+    }
+
+    if (modelSelect) {
+      let html = '';
+      
+      // 1. 服务商专属官方推荐模型
+      html += `<optgroup label="🌟 ${preset.name} 专属推荐模型">`;
+      (preset.models || []).forEach(m => {
+        html += `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`;
+      });
+      html += `</optgroup>`;
+
+      // 2. 在线探测发现的实时模型 (若有)
+      if (fetchedOnlineModels && fetchedOnlineModels.length > 0) {
+        html += `<optgroup label="⚡ 在线探测发现可用模型 (${fetchedOnlineModels.length} 个)">`;
+        fetchedOnlineModels.forEach(mid => {
+          html += `<option value="${escapeHtml(mid)}">${escapeHtml(mid)}</option>`;
+        });
+        html += `</optgroup>`;
+      }
+
+      // 3. 自定义输入兜底
+      html += `<optgroup label="✏️ 自定义输入">
+        <option value="__custom__">自定义模型名称...</option>
+      </optgroup>`;
+
+      modelSelect.innerHTML = html;
+
+      // 选中项智能匹配
+      const wantModel = targetModel || preset.model;
+      let matched = false;
+      for (const opt of modelSelect.options) {
+        if (opt.value === wantModel) {
+          modelSelect.value = wantModel;
+          matched = true;
+          break;
+        }
+      }
+      if (matched) {
+        if (customBox) customBox.style.display = 'none';
+      } else {
+        modelSelect.value = '__custom__';
+        if (customBox) customBox.style.display = 'block';
+        if (customInput) customInput.value = wantModel;
+      }
+    }
+
+    if (visionSelect) {
+      let vHtml = `<option value="">✨ 智能自动路由 (根据主模型与服务商自适应)</option>`;
+      if (preset.vision_models && preset.vision_models.length > 0) {
+        vHtml += `<optgroup label="👁️ ${preset.name} 推荐多模态视觉">`;
+        preset.vision_models.forEach(vm => {
+          if (vm.id) {
+            vHtml += `<option value="${escapeHtml(vm.id)}">${escapeHtml(vm.name)}</option>`;
+          }
+        });
+        vHtml += `</optgroup>`;
+      }
+      visionSelect.innerHTML = vHtml;
+      visionSelect.value = targetVision !== undefined ? targetVision : (preset.vision_model || '');
+    }
+  }
 
   function updatePresetButtonsState(api_base) {
     const cleanBase = (api_base || '').trim().replace(/\/+$/, '');
@@ -2972,32 +3096,8 @@ function setupEventListeners() {
         }
       }
 
-      const modelSelect = document.getElementById('cfg-model-select');
-      const customBox = document.getElementById('cfg-custom-model-box');
-      const customInput = document.getElementById('cfg-custom-model-input');
-
-      let hasOption = false;
-      if (modelSelect) {
-        for (const opt of modelSelect.options) {
-          if (opt.value === preset.model) {
-            hasOption = true;
-            break;
-          }
-        }
-        if (hasOption) {
-          modelSelect.value = preset.model;
-          if (customBox) customBox.style.display = 'none';
-        } else {
-          modelSelect.value = '__custom__';
-          if (customBox) customBox.style.display = 'block';
-          if (customInput) customInput.value = preset.model;
-        }
-      }
-
-      const visionSelect = document.getElementById('cfg-vision-model-select');
-      if (visionSelect) {
-        visionSelect.value = preset.vision_model || '';
-      }
+      // 动态适配该服务商专属模型目录
+      populateModelOptions(pKey, preset.model, preset.vision_model);
 
       // 重置连通性状态框
       const testStatusEl = document.getElementById('cfg-test-status');
@@ -3023,12 +3123,66 @@ function setupEventListeners() {
     };
   }
 
+  // 温度采样语义提示
+  const updateTempSemanticHint = (v) => {
+    const hintEl = document.getElementById('cfg-temp-hint');
+    const val = parseFloat(v);
+    if (!hintEl) return;
+    if (val <= 0.15) {
+      hintEl.innerText = '🔒 严格确定性证明 (代码/数学贪心采样)';
+      hintEl.style.color = '#38bdf8';
+    } else if (val <= 0.45) {
+      hintEl.innerText = '⚖️ 均衡学术论证 (默认推荐)';
+      hintEl.style.color = '#34d399';
+    } else {
+      hintEl.innerText = '💡 启发式发散探索 (高创造性)';
+      hintEl.style.color = '#f59e0b';
+    }
+  };
+
   // 温度滑块与数值显示联动
   const tempSlider = document.getElementById('cfg-temperature');
   const tempVal = document.getElementById('cfg-temp-value');
   if (tempSlider && tempVal) {
     tempSlider.oninput = () => {
       tempVal.innerText = tempSlider.value;
+      updateTempSemanticHint(tempSlider.value);
+    };
+  }
+
+  // 探测在线模型按钮
+  const btnFetchModels = document.getElementById('btn-fetch-models');
+  if (btnFetchModels) {
+    btnFetchModels.onclick = async () => {
+      const api_base = (document.getElementById('cfg-api-base')?.value || '').trim();
+      const api_key = (document.getElementById('cfg-api-key')?.value || '').trim() || currentConfig.api_key || '';
+      if (!api_base) {
+        alert("请先填写接口基址 (API Base)");
+        return;
+      }
+      btnFetchModels.disabled = true;
+      btnFetchModels.innerText = '⏳ 探测中...';
+      try {
+        const res = await fetch('/api/fetch-models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_base, api_key })
+        });
+        const data = await res.json();
+        if (data.ok && data.models && data.models.length > 0) {
+          const curModel = modelSelectEl ? modelSelectEl.value : currentConfig.model;
+          const curVision = document.getElementById('cfg-vision-model-select')?.value || currentConfig.vision_model;
+          populateModelOptions(currentActiveProvider, curModel, curVision, data.models);
+          updateStatus(`✅ 探测成功！已拉取 ${data.models.length} 个在线模型`);
+        } else {
+          alert(`未能自动获取模型列表: ${data.error || '远端未开放 /v1/models 标准接口'}`);
+        }
+      } catch (err) {
+        alert(`探测请求异常: ${err.message}`);
+      } finally {
+        btnFetchModels.disabled = false;
+        btnFetchModels.innerText = '🔄 探测在线模型';
+      }
     };
   }
 
@@ -3049,11 +3203,12 @@ function setupEventListeners() {
   if (btnTestConn && testStatusEl) {
     btnTestConn.onclick = async () => {
       const api_base = document.getElementById('cfg-api-base').value.trim();
-      let model = modelSelectEl ? modelSelectEl.value : 'deepseek-ai/DeepSeek-V4-Pro';
+      let model = modelSelectEl ? modelSelectEl.value : 'gemini-3.8-flash-high';
       if (model === '__custom__') {
-        model = (customInputEl?.value || '').trim() || 'deepseek-ai/DeepSeek-V4-Pro';
+        model = (customInputEl?.value || '').trim() || 'gemini-3.8-flash-high';
       }
       const api_key = (apiKeyInput?.value || '').trim() || currentConfig.api_key || '';
+      const temperature = parseFloat(tempSlider?.value || '0.3');
 
       if (!api_base) {
         alert("请输入接口基址 (API Base)");
@@ -3066,21 +3221,20 @@ function setupEventListeners() {
       testStatusEl.style.background = 'rgba(99, 102, 241, 0.12)';
       testStatusEl.style.border = '1px solid rgba(99, 102, 241, 0.3)';
       testStatusEl.style.color = '#c7d2fe';
-      testStatusEl.innerText = `⏳ 正在向 ${api_base} 发送探测请求 (模型: ${model})...`;
+      testStatusEl.innerText = `⏳ 正在向 ${api_base} 发送探测请求 (模型: ${model}, 采样温度: ${temperature})...`;
 
       try {
         const res = await fetch('/api/test-connection', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_base, api_key, model })
+          body: JSON.stringify({ api_base, api_key, model, temperature })
         });
         const data = await res.json();
         if (data.ok) {
           testStatusEl.style.background = 'rgba(16, 185, 129, 0.12)';
           testStatusEl.style.border = '1px solid rgba(16, 185, 129, 0.4)';
           testStatusEl.style.color = '#34d399';
-          testStatusEl.innerText = `✅ ${data.message}`;
-          // 连通成功顺便记忆 Key
+          testStatusEl.innerText = `✅ ${data.message} (实测采样温度: ${temperature})`;
           if (api_key && currentActiveProvider) {
             saveProviderKey(currentActiveProvider, api_key);
             updateProviderHintBar(currentActiveProvider);
@@ -3105,20 +3259,21 @@ function setupEventListeners() {
 
   // 打开设置弹窗
   const openSettingsHandler = () => {
-    const apiBase = currentConfig.api_base || 'https://api.siliconflow.cn/v1';
+    const apiBase = currentConfig.api_base || 'http://127.0.0.1:8045/v1';
     document.getElementById('cfg-api-base').value = apiBase;
 
-    // 智能恢复 Key
+    // 智能识别服务商
+    let matchedPKey = 'localproxy';
+    for (const [pk, p] of Object.entries(PROVIDER_PRESETS)) {
+      if (apiBase.includes(p.api_base.replace(/\/+$/, ''))) {
+        matchedPKey = pk;
+        break;
+      }
+    }
+    currentActiveProvider = matchedPKey;
+
     const savedKeys = getSavedProviderKeys();
     if (apiKeyInput) {
-      let matchedPKey = 'siliconflow';
-      for (const [pk, p] of Object.entries(PROVIDER_PRESETS)) {
-        if (apiBase.includes(p.api_base.replace(/\/+$/, ''))) {
-          matchedPKey = pk;
-          break;
-        }
-      }
-      currentActiveProvider = matchedPKey;
       if (savedKeys[matchedPKey]) {
         apiKeyInput.value = savedKeys[matchedPKey];
       } else if (currentConfig.api_key && currentConfig.api_key !== 'sk-antigravity') {
@@ -3130,37 +3285,17 @@ function setupEventListeners() {
       }
     }
 
-    // 渲染主模型
-    const model = currentConfig.model || 'deepseek-ai/DeepSeek-V4-Pro';
-    let hasOption = false;
-    if (modelSelectEl) {
-      for (const opt of modelSelectEl.options) {
-        if (opt.value === model) {
-          hasOption = true;
-          break;
-        }
-      }
-      if (hasOption) {
-        modelSelectEl.value = model;
-        if (customBoxEl) customBoxEl.style.display = 'none';
-      } else {
-        modelSelectEl.value = '__custom__';
-        if (customBoxEl) customBoxEl.style.display = 'block';
-        if (customInputEl) customInputEl.value = model;
-      }
-    }
+    // 动态渲染专属模型
+    const model = currentConfig.model || 'gemini-3.8-flash-high';
+    const vision = currentConfig.vision_model || '';
+    populateModelOptions(matchedPKey, model, vision);
 
-    // 渲染视觉模型
-    const visionSelect = document.getElementById('cfg-vision-model-select');
-    if (visionSelect) {
-      visionSelect.value = currentConfig.vision_model || '';
-    }
-
-    // 渲染温度
+    // 渲染温度与语义提示
     if (tempSlider && tempVal) {
       const t = currentConfig.temperature !== undefined ? currentConfig.temperature : 0.3;
       tempSlider.value = t;
       tempVal.innerText = t;
+      updateTempSemanticHint(t);
     }
 
     if (testStatusEl) testStatusEl.style.display = 'none';

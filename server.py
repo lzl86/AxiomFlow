@@ -30,10 +30,10 @@ SESSIONS_INDEX_FILE = SESSIONS_DIR / "index.json"
 MATERIALS_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_CONFIG = {
-    "api_base": "http://127.0.0.1:8046/v1",
-    "api_key": "sk-your-api-key-here",
-    "model": "deepseek-ai/DeepSeek-V4-Pro",
-    "vision_model": "Qwen/Qwen2.5-VL-72B-Instruct",
+    "api_base": "http://127.0.0.1:8045/v1",
+    "api_key": "sk-antigravity",
+    "model": "gemini-3.8-flash-high",
+    "vision_model": "gemini-3.8-flash-high",
     "temperature": 0.3
 }
 
@@ -646,6 +646,47 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({
                     "ok": False,
                     "error": f"无法连接至服务地址: {str(e)}"
+                }, ensure_ascii=False).encode("utf-8"))
+            return
+
+        elif parsed.path == "/api/fetch-models":
+            try:
+                req_data = json.loads(post_data.decode("utf-8")) if post_data else {}
+                api_base = (req_data.get("api_base") or "").strip().rstrip("/")
+                api_key = (req_data.get("api_key") or "").strip()
+                if not api_base:
+                    raise ValueError("接口基址 (API Base) 不能为空")
+                
+                models_url = f"{api_base}/models"
+                req = urllib.request.Request(
+                    models_url,
+                    headers={
+                        "Authorization": f"Bearer {api_key}" if api_key else "Bearer sk-antigravity",
+                        "Content-Type": "application/json"
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    raw_models = resp_data.get("data", [])
+                    model_ids = [m.get("id") for m in raw_models if isinstance(m, dict) and m.get("id")]
+                
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "ok": True,
+                    "count": len(model_ids),
+                    "models": model_ids
+                }, ensure_ascii=False).encode("utf-8"))
+            except Exception as e:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "ok": False,
+                    "error": f"从 {api_base}/models 拉取模型列表失败: {str(e)}"
                 }, ensure_ascii=False).encode("utf-8"))
             return
 
