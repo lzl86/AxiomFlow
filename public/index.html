@@ -31,25 +31,31 @@
     </div>
 
     <div class="toolbar">
-      <div class="status-pill">
-        <span class="status-dot"></span>
-        <span id="status-text">就绪 · 模型: Gemini 3.8 Flash (High)</span>
+      <!-- 紧凑双徽章状态指示器 -->
+      <div class="status-pill-group" id="btn-status-pill" title="当前模型调度状态 (点击打开模型配置)">
+        <div class="status-pill-badge" id="pill-reasoning" title="主推理模型">
+          <span class="status-dot"></span>
+          <span class="pill-label">🧠 <span id="status-reasoning-name">DeepSeek-V4</span></span>
+        </div>
+        <div class="status-pill-badge" id="pill-vision" title="视觉多模态模型">
+          <span class="pill-label">👁️ <span id="status-vision-name">Qwen2.5-VL</span></span>
+        </div>
       </div>
 
       <button id="btn-auto-layout" class="btn btn-primary" style="background: linear-gradient(135deg, #4f46e5, #06b6d4); border-color: #06b6d4;" title="Sugiyama 拓扑算法：一键消除卡片重叠，按因果流自适应排布">
-        <span>✨ 自动分层排布</span>
+        <span>✨ 整理排版</span>
       </button>
 
-      <button id="btn-add-question" class="btn btn-primary">
-        <span>+ 新增科研问题</span>
+      <button id="btn-add-question" class="btn btn-primary" title="新增待推演科研问题卡片">
+        <span>+ 科研问题</span>
       </button>
 
-      <button id="btn-add-material" class="btn">
-        <span>📑 引入文献片段</span>
+      <button id="btn-add-material" class="btn" title="引入文献片段">
+        <span>📑 文献片段</span>
       </button>
 
-      <button id="btn-toggle-reader" class="btn btn-success">
-        <span>📖 打开文献阅读器</span>
+      <button id="btn-toggle-reader" class="btn btn-success" title="展开/收起文献阅读器 (PDF / Markdown)">
+        <span>📖 文献阅读器</span>
       </button>
 
       <button id="btn-open-settings" class="btn" title="配置 API 端口与模型调度">
@@ -58,10 +64,6 @@
 
       <button id="btn-toggle-theme" class="btn" title="切换浅色 / 深色主题">
         <span id="theme-icon">☀️</span>
-      </button>
-
-      <button id="btn-reset-demo" class="btn" title="重载初始科研流程示例">
-        <span>↺ 重置示例</span>
       </button>
     </div>
   </header>
@@ -129,45 +131,33 @@
 
     <!-- 选项卡 2：文献阅读器 -->
     <div id="reader-panel" class="drawer-body" style="display: none; position: relative; height: 100%; display: flex; flex-direction: column;">
-      <div style="margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; flex-shrink: 0;">
-        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-          <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;">
-            <span style="font-size: 13px;">📄</span>
-            <select id="doc-selector" class="doc-selector" title="选择或切换当前课题绑定的文献资产">
-              <option value="">正在载入文献资产库...</option>
-            </select>
-          </div>
-          <div style="display: flex; gap: 6px; flex-shrink: 0;">
-            <label class="btn btn-secondary" style="font-size: 11px; padding: 4px 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.4); color: #c7d2fe;" title="上传本地 PDF / MD / TXT 论文">
-              📂 上传新文献
-              <input type="file" id="input-upload-file" accept=".pdf,.txt,.md,.markdown,.json,.tex" style="display: none;">
-            </label>
-            <button id="btn-import-whole-doc" onclick="importEntireDocumentAsMaterial()" class="btn btn-secondary" style="font-size: 11px; padding: 4px 9px; display: inline-flex; align-items: center; gap: 4px;" title="将当前文档全文或当前页存为实证卡片">
-              📑 全文入图
-            </button>
-          </div>
+      <!-- 顶部 2px 极细微阅读进度指示线 -->
+      <div id="reader-progress-line" class="reader-progress-line"></div>
+
+      <!-- 单行紧凑型文献与控制工具栏 -->
+      <div class="reader-compact-toolbar">
+        <div class="reader-toolbar-left">
+          <span style="font-size: 13px;">📄</span>
+          <select id="doc-selector" class="doc-selector" title="选择或切换当前课题绑定的文献资产">
+            <option value="">正在载入文献资产库...</option>
+          </select>
+          <label class="btn btn-secondary btn-icon-only" style="font-size: 11px; padding: 3px 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="上传本地 PDF / MD 论文">
+            <span>📂 上传</span>
+            <input type="file" id="input-upload-file" accept=".pdf,.txt,.md,.markdown,.json,.tex" style="display: none;">
+          </label>
         </div>
 
-        <!-- PDF 原生导航工具栏 (页码切换、缩放、跳页、目录) -->
-        <div id="pdf-toolbar" style="display: none; align-items: center; justify-content: space-between; margin-top: 8px; padding: 5px 8px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px; color: #cbd5e1;">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <button id="btn-toggle-outline" class="btn" style="padding: 2px 7px; font-size: 11px; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border-color: rgba(59, 130, 246, 0.4);" title="展开/收起文献章节目录大纲">📑 章节目录</button>
-            <button id="pdf-prev" class="btn" style="padding: 2px 8px; font-size: 11px;">◀ 上一页</button>
-            <span>第 <input id="pdf-page-input" type="number" value="1" min="1" style="width: 42px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff; text-align: center; border-radius: 4px; font-size: 11px; padding: 1px;"> / <span id="pdf-page-count">-</span> 页</span>
-            <button id="pdf-next" class="btn" style="padding: 2px 8px; font-size: 11px;">下一页 ▶</button>
-            <button id="btn-pdf-scroll-mode" class="btn" style="padding: 2px 7px; font-size: 11px; background: rgba(99, 102, 241, 0.15); color: #c7d2fe; border-color: rgba(99, 102, 241, 0.4);" title="当前模式：连续垂直滚动 (滚轮顺滑翻页)">📜 连续阅读</button>
-          </div>
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <button id="btn-pdf-snip" class="btn" style="padding: 2px 8px; font-size: 11px; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.4); color: #fde68a;" title="开启框选模式：在公式或插图上按住鼠标左键拉框，截取高清切片入图">✂️ 框选公式/图表</button>
-            <button id="pdf-zoom-out" class="btn" style="padding: 2px 6px; font-size: 11px;" title="缩小">🔍 -</button>
-            <span id="pdf-zoom-level" style="font-size: 11px; min-width: 38px; text-align: center;">自适应</span>
-            <button id="pdf-zoom-in" class="btn" style="padding: 2px 6px; font-size: 11px;" title="放大">🔍 +</button>
-          </div>
+        <!-- PDF 原生导航控制器 (单行合并) -->
+        <div id="pdf-toolbar" class="pdf-compact-bar" style="display: none;">
+          <button id="btn-toggle-outline" class="btn btn-xs" title="展开/收起文献章节目录大纲">📑 目录</button>
+          <button id="pdf-prev" class="btn btn-xs" title="上一页">◀</button>
+          <span class="pdf-page-indicator"><input id="pdf-page-input" type="number" value="1" min="1"> / <span id="pdf-page-count">-</span></span>
+          <button id="pdf-next" class="btn btn-xs" title="下一页">▶</button>
+          <button id="btn-pdf-snip" class="btn btn-xs btn-snip-accent" title="开启框选模式：在公式或插图上按住鼠标左键拉框，截取高清切片入图">✂️ 框选公式</button>
+          <button id="pdf-zoom-out" class="btn btn-xs" title="缩小">-</button>
+          <span id="pdf-zoom-level" class="pdf-zoom-label">自适应</span>
+          <button id="pdf-zoom-in" class="btn btn-xs" title="放大">+</button>
         </div>
-
-        <p id="reader-hint" style="font-size: 11.5px; color: #94a3b8; margin-top: 5px;">
-          支持<b>滚轮顺滑连续阅读</b>，点击<b>【📑 章节目录】</b>快速跳页，支持<b>划选文字</b>或<b>【✂️ 框选公式/图表】</b>入图。
-        </p>
       </div>
 
       <!-- 划词浮动工具栏 -->
@@ -248,7 +238,7 @@
         <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px;">
           <label style="font-size: 12px; color: #cbd5e1; display: flex; align-items: center; gap: 8px; cursor: pointer;">
             <input type="checkbox" id="inquiry-auto-ask" checked style="accent-color: #6366f1;">
-            <span>创建后立即调用 <strong id="inquiry-model-name" style="color: #818cf8;">Gemini 3.8 Flash (High)</strong> 原地完成推理解答</span>
+            <span>创建后立即调用 <strong id="inquiry-model-name" style="color: #818cf8;">DeepSeek-V4 Pro</strong> 原地完成推理解答</span>
           </label>
         </div>
 
@@ -264,43 +254,157 @@
 
   <!-- 模型与接口设置弹窗 -->
   <div id="settings-modal" class="modal-backdrop" style="display: none;">
-    <div class="modal-card" style="width: 520px;">
+    <div class="modal-card" style="width: 560px; max-width: 95vw;">
       <div class="modal-header">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 18px;">⚙️</span>
-          <h3 style="font-size: 15px; font-weight: 600; color: #f8fafc;">Antigravity Manager API 调度配置</h3>
+          <div>
+            <h3 style="font-size: 15px; font-weight: 600; color: #f8fafc; margin: 0;">模型调度与服务商配置</h3>
+            <p style="font-size: 11px; color: #94a3b8; margin-top: 2px;">支持国产 DeepSeek-V4 Pro / Qwen3.8-Max 与国际顶级模型自主组合</p>
+          </div>
         </div>
         <button id="btn-close-settings" class="modal-close-btn">✕</button>
       </div>
 
-      <div class="modal-body">
-        <div style="margin-bottom: 14px;">
-          <label style="font-size: 12px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">本地反代接口 (API Base)</label>
-          <input id="cfg-api-base" type="text" class="inquiry-textarea" style="height: 38px; resize: none;" value="http://127.0.0.1:8046/v1">
+      <div class="modal-body" style="padding: 16px 20px;">
+        <!-- 快捷服务商预设 -->
+        <div style="margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">⚡ 一键切换服务商预设</label>
+            <span style="font-size: 10.5px; color: #38bdf8;">点击即自动配齐模型与接口</span>
+          </div>
+          <div class="provider-presets-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;">
+            <button type="button" class="btn-preset-provider" data-provider="siliconflow" title="硅基流动：DeepSeek-V4 Pro / R1 + Qwen2.5-VL-72B">
+              <span class="preset-flag">🇨🇳</span>
+              <span class="preset-name">硅基流动</span>
+            </button>
+            <button type="button" class="btn-preset-provider" data-provider="dashscope" title="阿里百炼：Qwen3.8-Max + Qwen-VL-Max">
+              <span class="preset-flag">🇨🇳</span>
+              <span class="preset-name">阿里百炼</span>
+            </button>
+            <button type="button" class="btn-preset-provider" data-provider="deepseek" title="DeepSeek 官方：deepseek-chat / deepseek-reasoner">
+              <span class="preset-flag">🇨🇳</span>
+              <span class="preset-name">DeepSeek</span>
+            </button>
+            <button type="button" class="btn-preset-provider" data-provider="localproxy" title="本地 Antigravity 代理：Gemini 3.8 / Claude 3.5 / GPT-4o">
+              <span class="preset-flag">🌐</span>
+              <span class="preset-name">本地反代</span>
+            </button>
+            <button type="button" class="btn-preset-provider" data-provider="openai" title="OpenAI 官方：GPT-4o / o1 / o3-mini">
+              <span class="preset-flag">🌐</span>
+              <span class="preset-name">OpenAI</span>
+            </button>
+          </div>
         </div>
 
-        <div style="margin-bottom: 14px;">
-          <label style="font-size: 12px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">API 密钥 (API Key)</label>
-          <input id="cfg-api-key" type="password" class="inquiry-textarea" style="height: 38px; resize: none;" placeholder="sk-...">
+        <!-- 动态服务商技术说明与控制台官网链接 -->
+        <div id="cfg-provider-hint-bar" style="margin-bottom: 12px; padding: 7px 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 6px; font-size: 11.5px; color: #94a3b8; display: flex; align-items: center; justify-content: space-between;">
+          <span id="cfg-provider-hint-text">服务商：硅基流动 · 推荐 DeepSeek-V4 Pro (推理) + Qwen2.5-VL-72B (视觉)</span>
+          <a id="cfg-provider-link" href="https://cloud.siliconflow.cn/account/ak" target="_blank" rel="noopener noreferrer" style="color: #818cf8; text-decoration: none; font-size: 11.5px; display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;">
+            <span>cloud.siliconflow.cn ↗</span>
+          </a>
         </div>
 
-        <div style="margin-bottom: 18px;">
-          <label style="font-size: 12px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">推理模型选择 (Model)</label>
-          <select id="cfg-model-select" class="inquiry-textarea" style="height: 40px; cursor: pointer; color: #34d399; font-weight: 600;">
-            <option value="gemini-3.8-flash-high" selected>gemini-3.8-flash-high (当前推荐)</option>
-            <option value="gemini-3.8-flash-medium">gemini-3.8-flash-medium</option>
-            <option value="gemini-3.8-flash-low">gemini-3.8-flash-low</option>
-            <option value="gemini-3.8-flash-tiered">gemini-3.8-flash-tiered</option>
-            <option value="gemini-3.7-flash">gemini-3.7-flash</option>
-            <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet-20241022</option>
-            <option value="claude-opus-4-5-thinking">claude-opus-4-5-thinking</option>
-            <option value="gpt-4o">gpt-4o</option>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div>
+            <label style="font-size: 12px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">接口基址 (API Base)</label>
+            <input id="cfg-api-base" type="text" class="inquiry-textarea" style="height: 38px; resize: none; font-size: 12px;" value="https://api.siliconflow.cn/v1">
+          </div>
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">API 密钥 (API Key)</label>
+              <span id="cfg-key-status" style="font-size: 10.5px; color: #10b981;">本地私密记忆</span>
+            </div>
+            <div style="position: relative; display: flex; align-items: center;">
+              <input id="cfg-api-key" type="password" class="inquiry-textarea" style="height: 38px; resize: none; font-size: 12px; padding-right: 36px;" placeholder="粘贴以 sk- 开头的密钥...">
+              <button type="button" id="btn-toggle-key-visibility" title="显示/隐藏明文密钥" style="position: absolute; right: 6px; background: none; border: none; cursor: pointer; color: #94a3b8; font-size: 13px; padding: 4px;">👁️</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 推理模型选择 -->
+        <div style="margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">🧠 主推理模型 (Reasoning Model)</label>
+            <span style="font-size: 11px; color: #34d399;" id="cfg-model-badge">国产 & 国际自由调度</span>
+          </div>
+          <select id="cfg-model-select" class="inquiry-textarea" style="height: 40px; cursor: pointer; color: #34d399; font-weight: 600; font-size: 12.5px;">
+            <optgroup label="🇨🇳 国产顶尖推理与通识模型 (DeepSeek & 通义千问)">
+              <option value="deepseek-ai/DeepSeek-V4-Pro" selected>deepseek-ai/DeepSeek-V4-Pro (深度推演旗舰)</option>
+              <option value="deepseek-ai/DeepSeek-R1">deepseek-ai/DeepSeek-R1 (硅基流动 · 强逻辑)</option>
+              <option value="deepseek-ai/DeepSeek-V3">deepseek-ai/DeepSeek-V3 (硅基流动 · 高速通用)</option>
+              <option value="deepseek-reasoner">deepseek-reasoner (DeepSeek 官方深度思考)</option>
+              <option value="deepseek-chat">deepseek-chat (DeepSeek 官方通用高速)</option>
+              <option value="qwen3.8-max">qwen3.8-max (阿里百炼 · 最新学术旗舰)</option>
+              <option value="qwen-max">qwen-max (阿里百炼 · 复杂学术长文)</option>
+              <option value="qwen-plus">qwen-plus (阿里百炼 · 高性价比)</option>
+            </optgroup>
+            <optgroup label="🌐 国际前沿与多模态模型 (Google / Anthropic / OpenAI)">
+              <option value="gemini-3.8-flash-high">gemini-3.8-flash-high (Google 深度思考)</option>
+              <option value="gemini-3.8-flash-medium">gemini-3.8-flash-medium</option>
+              <option value="gemini-3.8-flash-low">gemini-3.8-flash-low</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro (Google 综合旗舰)</option>
+              <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet-20241022</option>
+              <option value="claude-opus-4-5-thinking">claude-opus-4-5-thinking</option>
+              <option value="gpt-4o">gpt-4o (OpenAI 全模态)</option>
+              <option value="o1">o1 (OpenAI 深度推理)</option>
+              <option value="o3-mini">o3-mini (OpenAI 极速推理)</option>
+            </optgroup>
+            <optgroup label="✏️ 自定义输入">
+              <option value="__custom__">自定义模型名称...</option>
+            </optgroup>
           </select>
         </div>
 
-        <div style="display: flex; justify-content: flex-end; gap: 10px;">
-          <button id="btn-cancel-settings" class="btn">取消</button>
-          <button id="btn-save-settings" class="btn btn-primary">保存配置</button>
+        <!-- 自定义模型手动输入框 -->
+        <div id="cfg-custom-model-box" style="display: none; margin-bottom: 12px;">
+          <label style="font-size: 11.5px; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;">自定义模型标识 (Model Identifier)</label>
+          <input id="cfg-custom-model-input" type="text" class="inquiry-textarea" style="height: 36px; resize: none; font-size: 12px;" placeholder="例如: custom-llm-v1 或 deepseek-ai/DeepSeek-V4-Pro">
+        </div>
+
+        <!-- 视觉多模态模型 (双引擎分发) -->
+        <div style="margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">👁️ 多模态视觉模型 (Vision Model · 截框公式/光路解析)</label>
+            <span style="font-size: 10.5px; color: #818cf8;">双引擎分发守卫</span>
+          </div>
+          <select id="cfg-vision-model-select" class="inquiry-textarea" style="height: 40px; cursor: pointer; color: #818cf8; font-size: 12px;">
+            <option value="">✨ 智能自动路由 (根据主模型与服务商自适应)</option>
+            <optgroup label="🇨🇳 国产多模态视觉 (公式/光路/插图解析)">
+              <option value="Qwen/Qwen2.5-VL-72B-Instruct">Qwen/Qwen2.5-VL-72B-Instruct (硅基流动)</option>
+              <option value="qwen-vl-max">qwen-vl-max (阿里百炼 · 旗舰视觉)</option>
+              <option value="qwen-vl-plus">qwen-vl-plus (阿里百炼 · 极速视觉)</option>
+              <option value="Pro/Qwen/Qwen2.5-VL-7B-Instruct">Pro/Qwen/Qwen2.5-VL-7B-Instruct (极速轻量)</option>
+            </optgroup>
+            <optgroup label="🌐 国际多模态视觉">
+              <option value="gemini-3.8-flash-high">gemini-3.8-flash-high (高精度 LaTeX 公式 OCR)</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro (深度图表解析)</option>
+              <option value="gpt-4o">gpt-4o (OpenAI 视觉)</option>
+              <option value="gpt-4o-mini">gpt-4o-mini (轻量视觉)</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <!-- 推理温度与高级设置 -->
+        <div class="temperature-config-bar" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="temperature-label" style="font-size: 12px;">🌡️ 推理采样温度 (Temperature):</span>
+            <span id="cfg-temp-value" class="temperature-value" style="font-size: 12px; font-weight: bold;">0.3</span>
+          </div>
+          <input id="cfg-temperature" type="range" min="0" max="1" step="0.05" value="0.3" style="width: 140px; accent-color: #6366f1; cursor: pointer;">
+        </div>
+
+        <!-- 连通性测试反馈通知条 -->
+        <div id="cfg-test-status" style="display: none; margin-bottom: 14px; padding: 8px 12px; border-radius: 6px; font-size: 12px; line-height: 1.5;"></div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+          <button type="button" id="btn-test-connection" class="btn" style="background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.4); color: #c7d2fe; padding: 7px 14px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px;" title="向当前接口与模型发送轻量探测请求，验证 API Key 与连通性">
+            <span>⚡ 测试连接</span>
+          </button>
+          <div style="display: flex; gap: 8px;">
+            <button id="btn-cancel-settings" class="btn">取消</button>
+            <button id="btn-save-settings" class="btn btn-primary" style="padding: 7px 18px;">保存并应用配置</button>
+          </div>
         </div>
       </div>
     </div>
@@ -335,11 +439,11 @@
     <button id="sel-btn-copy" class="sel-btn" title="复制划线文本到剪贴板">
       <span class="sel-icon">📋</span> 复制
     </button>
-    <button id="sel-btn-inquiry" class="sel-btn" title="以此概念展开新课题追问">
-      <span class="sel-icon">💡</span> 追问概念
+    <button id="sel-btn-inquiry" class="sel-btn" title="以此概念展开新课题追问 (快捷键: Q)">
+      <span class="sel-icon">💡</span> 追问概念 <span class="hotkey-hint">Q</span>
     </button>
-    <button id="sel-btn-material" class="sel-btn" title="将此文本存为独立的文献实证节点">
-      <span class="sel-icon">📖</span> 存为实证
+    <button id="sel-btn-material" class="sel-btn" title="将此文本存为独立的文献实证节点 (快捷键: E)">
+      <span class="sel-icon">📖</span> 存为实证 <span class="hotkey-hint">E</span>
     </button>
   </div>
 

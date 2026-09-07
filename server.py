@@ -32,9 +32,42 @@ MATERIALS_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_CONFIG = {
     "api_base": "http://127.0.0.1:8046/v1",
     "api_key": "sk-your-api-key-here",
-    "model": "gemini-3.8-flash-high",
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "vision_model": "Qwen/Qwen2.5-VL-72B-Instruct",
     "temperature": 0.3
 }
+
+def resolve_vision_model(conf):
+    """
+    智能解析多模态视觉模型 (双引擎分发):
+    1. 若显式配置了 vision_model, 优先采用;
+    2. 若主模型本身具备视觉多模态能力 (Gemini, GPT-4o, Claude 等), 沿用主模型;
+    3. 若主模型为纯文本推理模型 (DeepSeek-V4 Pro, DeepSeek-R1, Qwen3.8-Max 等),
+       按当前 api_base 智能路由至服务商最佳视觉多模态模型 (Qwen2.5-VL-72B / qwen-vl-max / Gemini 3.8 Flash).
+    """
+    vision_model = conf.get("vision_model", "").strip() if conf.get("vision_model") else ""
+    if vision_model:
+        return vision_model
+    
+    main_model = conf.get("model", "deepseek-ai/DeepSeek-V4-Pro").strip()
+    main_lower = main_model.lower()
+    
+    # 判断主模型是否具备原生视觉多模态能力
+    is_vision_capable = any(k in main_lower for k in ["gemini", "gpt-4o", "gpt-4.5", "claude-3", "claude-opus", "vl", "vision", "omni", "4v"])
+    is_pure_text_reasoner = any(k in main_lower for k in ["r1", "reasoner", "deepseek-chat", "v4-pro", "deepseek-v3", "deepseek-v4", "qwen3.8-max", "qwen-max", "qwen-plus"])
+    
+    if is_vision_capable and not is_pure_text_reasoner:
+        return main_model
+    
+    api_base = conf.get("api_base", "").lower()
+    if "siliconflow" in api_base:
+        return "Qwen/Qwen2.5-VL-72B-Instruct"
+    elif "dashscope" in api_base or "aliyuncs" in api_base:
+        return "qwen-vl-max"
+    elif "openai.com" in api_base:
+        return "gpt-4o"
+    else:
+        return "gemini-3.8-flash-high"
 
 def get_config():
     if not CONFIG_FILE.exists():
@@ -213,7 +246,26 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(json.dumps({
-                    "models": ["gemini-2.5-flash", "gemini-2.5-pro", "claude-3-5-sonnet-20241022", "gpt-4o"],
+                    "models": [
+                        "deepseek-ai/DeepSeek-V4-Pro",
+                        "deepseek-ai/DeepSeek-R1",
+                        "deepseek-ai/DeepSeek-V3",
+                        "deepseek-reasoner",
+                        "deepseek-chat",
+                        "qwen3.8-max",
+                        "qwen-max",
+                        "qwen-plus",
+                        "Qwen/Qwen2.5-VL-72B-Instruct",
+                        "qwen-vl-max",
+                        "gemini-3.8-flash-high",
+                        "gemini-3.8-flash-medium",
+                        "gemini-2.5-pro",
+                        "claude-3-5-sonnet-20241022",
+                        "claude-opus-4-5-thinking",
+                        "gpt-4o",
+                        "o1",
+                        "o3-mini"
+                    ],
                     "warning": str(e)
                 }).encode("utf-8"))
             return
@@ -301,7 +353,18 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 initial_graph = {
                     "version": "1.0.0",
                     "project": title,
-                    "nodes": [],
+                    "nodes": [
+                        {
+                            "id": f"n_q_{int(time.time() * 1000)}",
+                            "kind": "question",
+                            "title": title,
+                            "question": "",
+                            "response": "",
+                            "status": "idle",
+                            "x": 240,
+                            "y": 160
+                        }
+                    ],
                     "edges": []
                 }
                 with open(new_file, "w", encoding="utf-8") as f:
@@ -313,7 +376,7 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                     "title": title,
                     "createdAt": int(time.time() * 1000),
                     "updatedAt": int(time.time() * 1000),
-                    "nodeCount": 0
+                    "nodeCount": 1
                 }
                 idx["sessions"].insert(0, new_session_meta)
                 idx["activeId"] = new_id
@@ -513,6 +576,79 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
             return
 
+        elif parsed.path == "/api/test-connection":
+            try:
+                req_data = json.loads(post_data.decode("utf-8")) if post_data else {}
+                api_base = (req_data.get("api_base") or "").strip().rstrip("/")
+                api_key = (req_data.get("api_key") or "").strip()
+                model = (req_data.get("model") or "gemini-3.8-flash-high").strip()
+
+                if not api_base:
+                    raise ValueError("接口基址 (API Base) 不能为空")
+
+                start_time = time.time()
+                chat_url = f"{api_base}/chat/completions"
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 5,
+                    "temperature": 0.1
+                }
+                req = urllib.request.Request(
+                    chat_url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {api_key}" if api_key else "",
+                        "Content-Type": "application/json"
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=12) as res:
+                    res.read()
+                    latency_ms = int((time.time() - start_time) * 1000)
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "ok": True,
+                    "latency_ms": latency_ms,
+                    "model": model,
+                    "message": f"连接成功！响应延迟: {latency_ms}ms · 模型【{model}】就绪"
+                }, ensure_ascii=False).encode("utf-8"))
+            except urllib.error.HTTPError as he:
+                err_msg = str(he)
+                try:
+                    err_json = json.loads(he.read().decode("utf-8"))
+                    if "error" in err_json and isinstance(err_json["error"], dict):
+                        err_msg = err_json["error"].get("message", err_msg)
+                    elif "message" in err_json:
+                        err_msg = err_json.get("message", err_msg)
+                except Exception:
+                    pass
+                if he.code == 401:
+                    err_msg = f"API 密钥认证失败 (401 Unauthorized)，请检查 Key 是否填写正确。[{err_msg}]"
+                elif he.code == 404:
+                    err_msg = f"模型或接口未找到 (404 Not Found)，请确认服务商是否支持【{model}】。[{err_msg}]"
+                else:
+                    err_msg = f"服务商返回错误 (HTTP {he.code}): {err_msg}"
+                
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "error": err_msg}, ensure_ascii=False).encode("utf-8"))
+            except Exception as e:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "ok": False,
+                    "error": f"无法连接至服务地址: {str(e)}"
+                }, ensure_ascii=False).encode("utf-8"))
+            return
+
         elif parsed.path == "/api/generate":
             try:
                 req_data = json.loads(post_data.decode("utf-8"))
@@ -637,7 +773,8 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 conf = get_config()
                 api_base = conf.get("api_base", "http://127.0.0.1:8046/v1").rstrip("/")
                 api_key = conf.get("api_key", "sk-fa35bb3e2d294734b6d82323a765531b")
-                model = conf.get("model", "gemini-3.8-flash-high")
+                # 智能解析视觉模型 (支持双引擎分发)
+                model = resolve_vision_model(conf)
                 
                 system_prompt = (
                     "你是一个精通学术论文、数学公式与光学成像理论的高级科研助手。\n"
@@ -673,7 +810,7 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                     }
                 )
                 
-                with urllib.request.urlopen(req, timeout=35) as resp:
+                with urllib.request.urlopen(req, timeout=45) as resp:
                     resp_data = json.loads(resp.read().decode("utf-8"))
                     answer = resp_data["choices"][0]["message"]["content"]
                     
@@ -681,7 +818,7 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({"ok": True, "analysis": answer}).encode("utf-8"))
+                self.wfile.write(json.dumps({"ok": True, "analysis": answer, "model_used": model}).encode("utf-8"))
             except Exception as e:
                 print("OCR Formula 异常:", e)
                 self.send_response(500)

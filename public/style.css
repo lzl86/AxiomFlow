@@ -1231,6 +1231,8 @@ body {
   overflow: hidden;
   opacity: 1;
   line-height: 1;
+  transform-origin: 0 0;
+  caret-color: #6366f1;
   user-select: text !important;
 }
 
@@ -1910,6 +1912,388 @@ body {
 [data-theme="light"] .card-modal-footer {
   background: #f8fafc;
   border-top-color: #e2e8f0;
+}
+
+/* ==========================================
+   服务商预设按钮与调度面板增强
+   ========================================== */
+.btn-preset-provider {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #cbd5e1;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.btn-preset-provider:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.4);
+  color: #818cf8;
+  transform: translateY(-1px);
+}
+
+.btn-preset-provider.active {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: #818cf8;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.35);
+}
+
+.btn-preset-provider .preset-flag {
+  font-size: 13px;
+}
+
+.btn-preset-provider .preset-name {
+  font-size: 11px;
+}
+
+.preset-tag-pill {
+  font-size: 9.5px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+  transform: scale(0.9);
+}
+
+.btn-preset-provider.active .preset-tag-pill {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+/* 浅色模式适配 */
+[data-theme="light"] .btn-preset-provider {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+[data-theme="light"] .btn-preset-provider:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: #6366f1;
+  color: #4338ca;
+}
+
+[data-theme="light"] .btn-preset-provider.active {
+  background: #6366f1;
+  border-color: #4f46e5;
+  color: #ffffff;
+}
+
+[data-theme="light"] .btn-preset-provider.active .preset-tag-pill {
+  background: rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+}
+
+[data-theme="light"] #cfg-provider-hint-bar {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #475569 !important;
+}
+
+[data-theme="light"] #btn-test-connection {
+  background: rgba(99, 102, 241, 0.1) !important;
+  border-color: #6366f1 !important;
+  color: #4338ca !important;
+}
+
+[data-theme="light"] #btn-test-connection:hover {
+  background: rgba(99, 102, 241, 0.2) !important;
+}
+
+/* 浅色模式下 PDF 工具栏高亮按钮对比度加深 (WCAG AA 守卫) */
+[data-theme="light"] #btn-pdf-scroll-mode {
+  background: rgba(99, 102, 241, 0.12) !important;
+  color: #4338ca !important; /* 经典深靛蓝，对比度 > 6:1 */
+  border-color: rgba(99, 102, 241, 0.45) !important;
+}
+
+[data-theme="light"] #btn-pdf-snip {
+  background: rgba(217, 119, 6, 0.12) !important;
+  color: #b45309 !important; /* 经典深琥珀色，对比度 > 5:1 */
+  border-color: rgba(217, 119, 6, 0.45) !important;
+}
+
+.temperature-config-bar {
+  background: rgba(0, 0, 0, 0.25);
+  border-color: var(--border-color);
+}
+
+.temperature-label {
+  color: #cbd5e1;
+}
+
+.temperature-value {
+  color: #38bdf8;
+}
+
+/* 浅色模式下设置面板文字与控件高对比度强化 */
+[data-theme="light"] .temperature-config-bar {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .temperature-label {
+  color: #334155 !important;
+  font-weight: 500;
+}
+
+[data-theme="light"] .temperature-value {
+  color: #0284c7 !important;
+}
+
+[data-theme="light"] .modal-body label {
+  color: #334155 !important;
+}
+
+[data-theme="light"] #cfg-model-select {
+  color: #047857 !important; /* 深翡翠绿，对比度 > 6:1 */
+  background: #ffffff !important;
+}
+
+[data-theme="light"] #cfg-vision-model-select {
+  color: #4338ca !important; /* 深靛蓝，对比度 > 6:1 */
+  background: #ffffff !important;
+}
+
+[data-theme="light"] #btn-cancel-settings {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+[data-theme="light"] #btn-cancel-settings:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+/* ==========================================
+   双胶囊状态指示器 (Navbar Dual Pill Badge)
+   ========================================== */
+.status-pill-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.status-pill-group:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.4);
+  transform: translateY(-1px);
+}
+
+.status-pill-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+#pill-reasoning {
+  background: rgba(16, 185, 129, 0.1);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+#pill-vision {
+  background: rgba(99, 102, 241, 0.1);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+  animation: pulse-dot 2s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+[data-theme="light"] .status-pill-group {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .status-pill-group:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: #6366f1;
+}
+
+[data-theme="light"] #pill-reasoning {
+  background: rgba(16, 185, 129, 0.15);
+  color: #047857;
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+[data-theme="light"] #pill-vision {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4338ca;
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+/* ==========================================
+   紧凑单行文献工具栏与极细阅读进度线
+   ========================================== */
+.reader-progress-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 0%;
+  background: linear-gradient(90deg, #6366f1, #38bdf8);
+  z-index: 60;
+  transition: width 0.1s ease-out;
+  pointer-events: none;
+}
+
+.reader-compact-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(15, 23, 42, 0.6);
+  flex-shrink: 0;
+}
+
+.reader-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pdf-compact-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.btn-xs {
+  padding: 2px 6px !important;
+  font-size: 11px !important;
+  height: 26px !important;
+  line-height: 1 !important;
+  border-radius: 4px !important;
+}
+
+.btn-snip-accent {
+  background: rgba(245, 158, 11, 0.18) !important;
+  color: #f59e0b !important;
+  border-color: rgba(245, 158, 11, 0.5) !important;
+}
+
+.btn-snip-accent:hover {
+  background: rgba(245, 158, 11, 0.3) !important;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.35) !important;
+}
+
+[data-theme="light"] .reader-compact-toolbar {
+  background: #f8fafc;
+  border-bottom-color: #e2e8f0;
+}
+
+/* ==========================================
+   拓扑因果聚焦与降噪高亮 (Topology Focus · 硬件加速版)
+   ========================================== */
+.canvas-world {
+  will-change: transform;
+}
+
+.node {
+  will-change: left, top;
+  transition: box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.node.smooth-moving {
+  transition: left 0.35s cubic-bezier(0.16, 1, 0.3, 1), top 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.node.topo-dim {
+  opacity: 0.28 !important;
+  pointer-events: auto;
+}
+
+.node.topo-focus {
+  opacity: 1 !important;
+  box-shadow: 0 0 0 1.5px rgba(99, 102, 241, 0.7), 0 8px 24px rgba(99, 102, 241, 0.25) !important;
+}
+
+.node.topo-focus.selected {
+  box-shadow: 0 0 0 2px #6366f1, 0 10px 30px rgba(99, 102, 241, 0.4) !important;
+}
+
+.edge-path {
+  transition: opacity 0.2s ease, stroke 0.2s ease;
+}
+
+.edge-path.topo-dim {
+  opacity: 0.12 !important;
+}
+
+.edge-path.topo-focus {
+  stroke: #60a5fa !important;
+  stroke-width: 2.5px !important;
+  opacity: 1 !important;
+}
+
+[data-theme="light"] .node.topo-focus {
+  box-shadow: 0 0 0 2px #6366f1, 0 8px 24px rgba(99, 102, 241, 0.2) !important;
+}
+
+[data-theme="light"] .node.topo-dim {
+  opacity: 0.3 !important;
+}
+
+/* ==========================================
+   划词快捷键提示徽章 (Hotkey Badge)
+   ========================================== */
+.hotkey-hint {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  margin-left: 4px;
+  line-height: 1.1;
+  color: inherit;
+  opacity: 0.85;
+}
+
+[data-theme="light"] .hotkey-hint {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.12);
 }
 
 

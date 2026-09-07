@@ -11,8 +11,21 @@ let lastMtime = 0;
 let currentConfig = {
   api_base: "http://127.0.0.1:8046/v1",
   api_key: "",
-  model: "gemini-3.8-flash-high"
+  model: "deepseek-ai/DeepSeek-V4-Pro",
+  vision_model: "Qwen/Qwen2.5-VL-72B-Instruct",
+  temperature: 0.3
 };
+
+function formatModelStatusText(conf) {
+  const model = conf.model || 'deepseek-ai/DeepSeek-V4-Pro';
+  const shortModel = model.includes('/') ? model.split('/').pop() : model;
+  const vision = conf.vision_model;
+  if (vision) {
+    const shortVision = vision.includes('/') ? vision.split('/').pop() : vision;
+    return `就绪 · 推理: ${shortModel} | 视觉: ${shortVision}`;
+  }
+  return `就绪 · 模型: ${shortModel}`;
+}
 
 // 画布视口平移与缩放（默认以 0.8 全景视角舒适展开，避免重叠卡片）
 let pan = { x: 30, y: 20 };
@@ -23,6 +36,8 @@ let startPan = { x: 0, y: 0 };
 // 拖拽与连线临时状态
 let draggingNodeId = null;
 let dragOffset = { x: 0, y: 0 };
+let dragStartPos = { x: 0, y: 0 };
+let isActuallyDragging = false;
 let connectingSourceId = null;
 let tempMousePos = { x: 0, y: 0 };
 
@@ -39,12 +54,12 @@ const settingsModal = document.getElementById('settings-modal');
 // 初始化
 async function init() {
   initTheme();
-  await loadConfig();
-  await loadSessions();
-  await loadGraph();
   setupEventListeners();
   initSelectionToolbar();
   updateZoomIndicator();
+  await loadConfig();
+  await loadSessions();
+  await loadGraph();
   renderNodes();
   requestAnimationFrame(() => renderEdges());
   startVersionPolling();
@@ -86,7 +101,7 @@ async function loadConfig() {
   try {
     const res = await fetch('/api/config');
     currentConfig = await res.json();
-    updateStatus(`就绪 · 当前模型: ${currentConfig.model}`);
+    updateStatus(formatModelStatusText(currentConfig));
     const inquiryModelEl = document.getElementById('inquiry-model-name');
     if (inquiryModelEl) inquiryModelEl.innerText = currentConfig.model;
   } catch (e) {
@@ -130,10 +145,14 @@ function debouncedSave() {
   }, 350);
 }
 
-// 轮询检查后端变动
+// 轮询检查后端变动 (保护用户交互状态，绝不在拖拽/输入时强行刷掉 DOM)
 function startVersionPolling() {
   setInterval(async () => {
     try {
+      if (draggingNodeId || isPanning || connectingSourceId) return;
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return;
+
       const res = await fetch(`/api/version?sessionId=${encodeURIComponent(currentSessionId)}`);
       const data = await res.json();
       if (lastMtime && data.mtime > lastMtime) {
@@ -217,7 +236,7 @@ function createNodeElement(node) {
     conclusion: '综合结论'
   };
 
-  let statusBadge = `<span style="color: #64748b; font-size: 11px;">#${node.id}</span>`;
+  let statusBadge = '';
   if (isGenerating) {
     statusBadge = `<span style="color: #38bdf8; font-size: 11px;">⏳ 正在推理...</span>`;
   } else if (node.status === 'pending') {
@@ -257,7 +276,7 @@ function createNodeElement(node) {
 
   // 单击选中（若点击的是问题文本，自动聚焦右侧输入框）
   div.addEventListener('click', (e) => {
-    if (e.target.closest('.port') || e.target.closest('.node-btn-icon')) return;
+    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select')) return;
     selectNode(node.id);
     if (e.target.closest('.card-question-text')) {
       setTimeout(() => {
@@ -269,26 +288,34 @@ function createNodeElement(node) {
 
   // 双击全屏阅读
   div.addEventListener('dblclick', (e) => {
-    if (e.target.closest('.port') || e.target.closest('.node-btn-icon')) return;
+    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select')) return;
     openCardFullscreen(node);
   });
 
   // 放大按钮
-  div.querySelector('.node-btn-expand').addEventListener('click', (e) => {
-    e.stopPropagation();
-    openCardFullscreen(node);
-  });
+  const expandBtn = div.querySelector('.node-btn-expand');
+  if (expandBtn) {
+    expandBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openCardFullscreen(node);
+    });
+  }
 
   // 删除按钮
-  div.querySelector('.node-btn-del').addEventListener('click', (e) => {
-    e.stopPropagation();
-    deleteNode(node.id);
-  });
+  const delBtn = div.querySelector('.node-btn-del');
+  if (delBtn) {
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteNode(node.id);
+    });
+  }
 
   // 节点拖拽
   div.addEventListener('mousedown', (e) => {
-    if (e.target.classList.contains('port') || e.target.classList.contains('node-btn-icon')) return;
+    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select')) return;
     draggingNodeId = node.id;
+    dragStartPos = { x: e.clientX, y: e.clientY };
+    isActuallyDragging = false;
     const worldPos = screenToWorld(e.clientX, e.clientY);
     dragOffset = {
       x: worldPos.x - node.x,
@@ -314,7 +341,7 @@ function calculateBezierPath(sx, sy, tx, ty) {
   }
 }
 
-// 渲染 SVG 连线
+// 渲染 SVG 连线 (结构变动时调用)
 function renderEdges() {
   svgEdges.innerHTML = `
     <defs>
@@ -325,22 +352,18 @@ function renderEdges() {
         <path d="M 0 1 L 9 5 L 0 9 z" fill="#34d399" />
       </marker>
     </defs>
+    <!-- 专用临时拖拽连线（避免频繁 DOM 创建与销毁） -->
+    <path id="temp-connecting-path" class="edge-path" style="stroke: #38bdf8; stroke-dasharray: 5 5; pointer-events: none; display: none;"></path>
   `;
 
-  graph.edges.forEach(edge => {
+  (graph.edges || []).forEach(edge => {
     const sourceNode = graph.nodes.find(n => n.id === edge.source);
     const targetNode = graph.nodes.find(n => n.id === edge.target);
     if (!sourceNode || !targetNode) return;
 
     const start = getPortCenter(edge.source, true);
     const end = getPortCenter(edge.target, false);
-
-    const sx = start.x;
-    const sy = start.y;
-    const tx = end.x;
-    const ty = end.y;
-
-    const pathD = calculateBezierPath(sx, sy, tx, ty);
+    const pathD = calculateBezierPath(start.x, start.y, end.x, end.y);
 
     const isDashed = edge.kind === 'dashed';
     const marker = isDashed ? 'url(#arrow-dashed)' : 'url(#arrow)';
@@ -348,6 +371,10 @@ function renderEdges() {
     const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
     hitPath.setAttribute("d", pathD);
     hitPath.setAttribute("class", "edge-hitarea");
+    hitPath.dataset.edgeId = edge.id;
+    hitPath.dataset.source = edge.source;
+    hitPath.dataset.target = edge.target;
+    hitPath.dataset.id = edge.id;
     hitPath.addEventListener("click", (e) => {
       e.stopPropagation();
       if (confirm("是否剪断此连线？（剪断后该节点将从下游 AI 视野中物理切除）")) {
@@ -359,37 +386,132 @@ function renderEdges() {
     path.setAttribute("d", pathD);
     path.setAttribute("class", `edge-path ${isDashed ? 'dashed' : ''}`);
     path.setAttribute("marker-end", marker);
+    path.dataset.edgeId = edge.id;
+    path.dataset.source = edge.source;
+    path.dataset.target = edge.target;
+    path.dataset.id = edge.id;
     path.title = "点击可剪断该上下文依赖";
 
     svgEdges.appendChild(hitPath);
     svgEdges.appendChild(path);
   });
 
-  // 临时拖拽线（使用世界坐标，严丝合缝跟随鼠标，防阻断端口点击）
+  if (connectingSourceId) {
+    updateTempConnectingEdge();
+  }
+
+  // 保持当前选中的拓扑高亮状态
+  if (selectedNodeId) {
+    applyTopologyFocus(selectedNodeId);
+  }
+}
+
+// 增量高效更新关联连线 (拖拽节点时 0 DOM 销毁，纯属性赋值，极速 120Hz 丝滑)
+function updateConnectedEdges(nodeId) {
+  if (!graph.edges || graph.edges.length === 0) return;
+
+  for (let i = 0; i < graph.edges.length; i++) {
+    const edge = graph.edges[i];
+    if (edge.source === nodeId || edge.target === nodeId) {
+      const start = getPortCenter(edge.source, true);
+      const end = getPortCenter(edge.target, false);
+      const pathD = calculateBezierPath(start.x, start.y, end.x, end.y);
+
+      const hitPath = svgEdges.querySelector(`.edge-hitarea[data-edge-id="${edge.id}"]`);
+      if (hitPath) hitPath.setAttribute("d", pathD);
+
+      const path = svgEdges.querySelector(`.edge-path[data-edge-id="${edge.id}"]`);
+      if (path) path.setAttribute("d", pathD);
+    }
+  }
+}
+
+// 增量更新临时连接线 (0 DOM 销毁)
+function updateTempConnectingEdge() {
+  const tempPath = document.getElementById('temp-connecting-path');
+  if (!tempPath) return;
+
   if (connectingSourceId) {
     const start = getPortCenter(connectingSourceId, true);
-    const sx = start.x;
-    const sy = start.y;
-    const tx = tempMousePos.x;
-    const ty = tempMousePos.y;
-    const pathD = calculateBezierPath(sx, sy, tx, ty);
-
-    const tempPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const pathD = calculateBezierPath(start.x, start.y, tempMousePos.x, tempMousePos.y);
     tempPath.setAttribute("d", pathD);
-    tempPath.setAttribute("class", "edge-path");
-    tempPath.style.stroke = "#38bdf8";
-    tempPath.style.strokeDasharray = "5 5";
-    tempPath.style.pointerEvents = "none";
-    svgEdges.appendChild(tempPath);
+    tempPath.style.display = "block";
+  } else {
+    tempPath.style.display = "none";
   }
+}
+
+// 拓扑因果聚焦高亮算法 (拓扑降噪与上下文流视效)
+function applyTopologyFocus(nodeId) {
+  if (!nodeId) {
+    document.querySelectorAll('.node').forEach(el => {
+      el.classList.remove('topo-focus', 'topo-dim', 'selected');
+    });
+    document.querySelectorAll('.edge-path').forEach(el => {
+      el.classList.remove('topo-focus', 'topo-dim');
+    });
+    return;
+  }
+
+  // 广度优先搜索：计算上游因果链路与下游依赖链路
+  const upstream = new Set();
+  const downstream = new Set();
+
+  const queueUp = [nodeId];
+  while (queueUp.length > 0) {
+    const curr = queueUp.shift();
+    (graph.edges || []).forEach(e => {
+      if (e.target === curr && !upstream.has(e.source) && e.source !== nodeId) {
+        upstream.add(e.source);
+        queueUp.push(e.source);
+      }
+    });
+  }
+
+  const queueDown = [nodeId];
+  while (queueDown.length > 0) {
+    const curr = queueDown.shift();
+    (graph.edges || []).forEach(e => {
+      if (e.source === curr && !downstream.has(e.target) && e.target !== nodeId) {
+        downstream.add(e.target);
+        queueDown.push(e.target);
+      }
+    });
+  }
+
+  const focusedNodes = new Set([nodeId, ...upstream, ...downstream]);
+
+  document.querySelectorAll('.node').forEach(el => {
+    const nid = el.dataset.id;
+    if (nid === nodeId) {
+      el.classList.add('selected', 'topo-focus');
+      el.classList.remove('topo-dim');
+    } else if (focusedNodes.has(nid)) {
+      el.classList.add('topo-focus');
+      el.classList.remove('topo-dim', 'selected');
+    } else {
+      el.classList.remove('topo-focus', 'selected');
+      el.classList.add('topo-dim');
+    }
+  });
+
+  document.querySelectorAll('.edge-path').forEach(el => {
+    const s = el.dataset.source;
+    const t = el.dataset.target;
+    if (s && t && focusedNodes.has(s) && focusedNodes.has(t)) {
+      el.classList.add('topo-focus');
+      el.classList.remove('topo-dim');
+    } else {
+      el.classList.remove('topo-focus');
+      el.classList.add('topo-dim');
+    }
+  });
 }
 
 // 选中节点
 function selectNode(id) {
   selectedNodeId = id;
-  document.querySelectorAll('.node').forEach(el => {
-    el.classList.toggle('selected', el.dataset.id === id);
-  });
+  applyTopologyFocus(id);
   openDrawer('inspector');
   updateContextInspector();
 }
@@ -857,6 +979,18 @@ async function initDocumentSystem() {
   setupDrawerResizer();
   setupPdfSnipper();
 
+  function updateReadingProgressBar(el) {
+    const line = document.getElementById('reader-progress-line');
+    if (!line || !el) return;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    if (maxScroll <= 0) {
+      line.style.width = '0%';
+      return;
+    }
+    const pct = Math.min(100, Math.max(0, (el.scrollTop / maxScroll) * 100));
+    line.style.width = `${pct}%`;
+  }
+
   // 划词摘录监听 (Markdown 模式)
   const mdContainer = document.getElementById('paper-content');
   if (mdContainer) {
@@ -866,15 +1000,19 @@ async function initDocumentSystem() {
     };
     mdContainer.onscroll = () => {
       saveReadingBreakpoint();
+      updateReadingProgressBar(mdContainer);
     };
   }
 
-  // PDF 划词摘录监听
+  // PDF 划词摘录监听与滚动进度更新
   const pdfViewContainer = document.getElementById('pdf-view-container');
   if (pdfViewContainer) {
     pdfViewContainer.onmouseup = () => {
       if (currentDocMode !== 'pdf') return;
       handleSelectionToolbar('pdf-text-layer', `${currentDocTitle} (P.${currentPdfPageNum})`);
+    };
+    pdfViewContainer.onscroll = () => {
+      updateReadingProgressBar(pdfViewContainer);
     };
   }
 
@@ -1410,7 +1548,12 @@ function updateCurrentPageOnScroll() {
   const containerRect = viewContainer.getBoundingClientRect();
   const probeY = containerRect.top + 80;
 
-  for (let p = 1; p <= currentPdfDoc.numPages; p++) {
+  // 1. 优先在当前页临近范围快速探测 (O(1) 毫秒级)
+  const startP = Math.max(1, currentPdfPageNum - 3);
+  const endP = Math.min(currentPdfDoc.numPages, currentPdfPageNum + 3);
+
+  let found = false;
+  for (let p = startP; p <= endP; p++) {
     const slot = document.getElementById(`pdf-slot-${p}`);
     if (!slot) continue;
     const r = slot.getBoundingClientRect();
@@ -1422,7 +1565,27 @@ function updateCurrentPageOnScroll() {
           pageInput.value = p;
         }
       }
+      found = true;
       break;
+    }
+  }
+
+  // 2. 若发生大跨度跳跃，再全局查找
+  if (!found) {
+    for (let p = 1; p <= currentPdfDoc.numPages; p++) {
+      const slot = document.getElementById(`pdf-slot-${p}`);
+      if (!slot) continue;
+      const r = slot.getBoundingClientRect();
+      if (r.top <= probeY && r.bottom >= probeY) {
+        if (currentPdfPageNum !== p) {
+          currentPdfPageNum = p;
+          const pageInput = document.getElementById('pdf-page-input');
+          if (pageInput && document.activeElement !== pageInput) {
+            pageInput.value = p;
+          }
+        }
+        break;
+      }
     }
   }
 }
@@ -1460,6 +1623,7 @@ async function renderPageSlot(pageNum) {
       textLayer.innerHTML = '';
       textLayer.style.width = canvas.style.width;
       textLayer.style.height = canvas.style.height;
+      textLayer.style.setProperty('--scale-factor', viewport.scale);
       const textContent = await page.getTextContent();
       if (window.pdfjsLib && window.pdfjsLib.renderTextLayer) {
         window.pdfjsLib.renderTextLayer({
@@ -1582,14 +1746,20 @@ function setupDrawerResizer() {
   }
 
   function setDrawerWidth(widthCss, key) {
+    const viewContainer = document.getElementById('pdf-view-container');
+    const prevRatio = viewContainer && (viewContainer.scrollHeight > viewContainer.clientHeight)
+      ? viewContainer.scrollTop / (viewContainer.scrollHeight - viewContainer.clientHeight)
+      : 0;
+
     drawer.style.width = widthCss;
     updateSizeButtons(key);
-    // 重新计算并铺满所有页面
+
+    // 零跳变平滑调宽：基于相对滚动比率就地恢复，严禁暴力重构/清空 DOM
     setTimeout(() => {
-      if (currentDocMode === 'pdf' && currentPdfDoc) {
-        buildContinuousScrollLayout().then(() => scrollToPage(currentPdfPageNum, false));
+      if (currentDocMode === 'pdf' && currentPdfDoc && viewContainer) {
+        viewContainer.scrollTop = prevRatio * (viewContainer.scrollHeight - viewContainer.clientHeight);
       }
-    }, 180);
+    }, 200);
   }
 
   if (btnCompact) btnCompact.onclick = () => setDrawerWidth('420px', 'compact');
@@ -1628,9 +1798,6 @@ function setupDrawerResizer() {
       resizer.classList.remove('active');
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      if (currentDocMode === 'pdf' && currentPdfDoc) {
-        buildContinuousScrollLayout().then(() => scrollToPage(currentPdfPageNum, false));
-      }
     };
 
     document.addEventListener('mousemove', onMouseMove);
@@ -2114,19 +2281,16 @@ async function handleCreateNewSession() {
       await loadGraph();
       await loadSessions();
       await restoreSessionActiveDoc();
-      selectedNodeId = null;
+      if (graph.nodes.length > 0) {
+        selectedNodeId = graph.nodes[0].id;
+        updateContextInspector();
+      } else {
+        selectedNodeId = null;
+      }
       renderNodes();
       requestAnimationFrame(() => renderEdges());
       closeSidebar();
       updateStatus(`就绪 · 新课题已建立: ${data.session.title}`);
-
-      // 贴心弹窗：自动引导用户在空白画布上输入首个问题
-      if (graph.nodes.length === 0) {
-        setTimeout(() => {
-          const btnAddQ = document.getElementById('btn-add-question');
-          if (btnAddQ) btnAddQ.click();
-        }, 300);
-      }
     }
   } catch (e) {
     console.error("创建新课题失败:", e);
@@ -2192,39 +2356,60 @@ async function handleDeleteSession(sessionId, title) {
 function setupEventListeners() {
   const container = document.getElementById('canvas-container');
 
-  // 画布平移
+  // 画布平移与点击空白处取消选中
   container.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.node') || e.target.closest('.port')) return;
+    if (e.target.closest('.node') || e.target.closest('.port') || e.target.closest('.zoom-controls')) return;
     isPanning = true;
     startPan = { x: e.clientX - pan.x, y: e.clientY - pan.y };
   });
 
+  container.addEventListener('click', (e) => {
+    if (e.target.closest('.node') || e.target.closest('.port') || e.target.closest('.zoom-controls') || e.target.closest('.edge-hitarea')) return;
+    selectedNodeId = null;
+    applyTopologyFocus(null);
+    updateContextInspector();
+  });
+
+  let mouseMoveRaf = null;
   window.addEventListener('mousemove', (e) => {
+    if (!isPanning && !draggingNodeId && !connectingSourceId) return;
+
     if (isPanning) {
       pan.x = e.clientX - startPan.x;
       pan.y = e.clientY - startPan.y;
-      world.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`;
-      return;
-    }
+    } else if (draggingNodeId) {
+      const dist = Math.hypot(e.clientX - dragStartPos.x, e.clientY - dragStartPos.y);
+      if (dist > 3) isActuallyDragging = true;
+      if (!isActuallyDragging) return;
 
-    if (draggingNodeId) {
       window.getSelection()?.removeAllRanges();
+      const worldPos = screenToWorld(e.clientX, e.clientY);
       const node = graph.nodes.find(n => n.id === draggingNodeId);
-      const nodeEl = document.querySelector(`.node[data-id="${draggingNodeId}"]`);
-      if (node && nodeEl) {
-        const worldPos = screenToWorld(e.clientX, e.clientY);
+      if (node) {
         node.x = worldPos.x - dragOffset.x;
         node.y = worldPos.y - dragOffset.y;
-        nodeEl.style.left = `${node.x}px`;
-        nodeEl.style.top = `${node.y}px`;
-        renderEdges();
       }
-      return;
+    } else if (connectingSourceId) {
+      tempMousePos = screenToWorld(e.clientX, e.clientY);
     }
 
-    if (connectingSourceId) {
-      tempMousePos = screenToWorld(e.clientX, e.clientY);
-      renderEdges();
+    if (!mouseMoveRaf) {
+      mouseMoveRaf = requestAnimationFrame(() => {
+        mouseMoveRaf = null;
+        if (isPanning) {
+          world.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`;
+        } else if (draggingNodeId && isActuallyDragging) {
+          const node = graph.nodes.find(n => n.id === draggingNodeId);
+          const nodeEl = document.querySelector(`.node[data-id="${draggingNodeId}"]`);
+          if (node && nodeEl) {
+            nodeEl.style.left = `${node.x}px`;
+            nodeEl.style.top = `${node.y}px`;
+            updateConnectedEdges(draggingNodeId);
+          }
+        } else if (connectingSourceId) {
+          updateTempConnectingEdge();
+        }
+      });
     }
   });
 
@@ -2232,11 +2417,13 @@ function setupEventListeners() {
     if (isPanning) isPanning = false;
 
     if (draggingNodeId) {
+      const wasDragging = isActuallyDragging;
       draggingNodeId = null;
+      isActuallyDragging = false;
       window.getSelection()?.removeAllRanges();
       const selToolbar = document.getElementById('selection-toolbar');
       if (selToolbar) selToolbar.style.display = 'none';
-      saveGraph();
+      if (wasDragging) saveGraph();
     }
 
     if (connectingSourceId) {
@@ -2255,18 +2442,19 @@ function setupEventListeners() {
             saveGraph();
             updateStatus(`已建立连线: ${connectingSourceId} -> ${targetId}`);
             if (selectedNodeId === targetId) updateContextInspector();
+            renderEdges();
           }
         }
       }
       connectingSourceId = null;
-      renderEdges();
+      updateTempConnectingEdge();
     }
   });
 
-  // 滚轮分流：光标在卡片内容区时完全放行浏览器原生 GPU 硬件加速平滑滚动；仅在画布空白区缩放
+  // 滚轮分流：光标在卡片内容区时放行原生滚动；仅在画布空白区缩放 (GPU 硬件加速，零重绘)
   container.addEventListener('wheel', (e) => {
     // 1. 若光标处于卡片内容区上方，且未按住 Ctrl/Cmd 键强制缩放画布：
-    // 绝对不调用 e.preventDefault()，直接放行给 Chromium 底层 Compositor 线程原生 120Hz 丝滑惯性滚动
+    // 直接放行给 Chromium 底层 Compositor 线程原生 120Hz 丝滑惯性滚动
     if (e.target.closest('.node-content') && !e.ctrlKey && !e.metaKey) {
       return;
     }
@@ -2282,7 +2470,7 @@ function setupEventListeners() {
       }
     }
 
-    // 画布背景滚轮缩放
+    // 画布背景滚轮缩放 (纯 CSS Transform，避免重绘 SVG 连线)
     e.preventDefault();
     const rect = container.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -2298,7 +2486,6 @@ function setupEventListeners() {
     pan.y = mouseY - (mouseY - pan.y) * (zoom / oldZoom);
     world.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`;
     updateZoomIndicator();
-    renderEdges();
   }, { passive: false });
 
   // 连线从输出端口触发
@@ -2307,7 +2494,7 @@ function setupEventListeners() {
     if (portOut) {
       connectingSourceId = portOut.dataset.node;
       tempMousePos = screenToWorld(e.clientX, e.clientY);
-      renderEdges();
+      updateTempConnectingEdge();
       e.stopPropagation();
     }
   });
@@ -2345,26 +2532,366 @@ function setupEventListeners() {
     updateStatus("已新建课题节点！请在右侧面板直接输入问题与标题。");
   };
 
-  document.getElementById('btn-add-material').onclick = () => {
-    openDrawer('reader');
-  };
+  const btnAddMaterial = document.getElementById('btn-add-material');
+  if (btnAddMaterial) btnAddMaterial.onclick = () => openDrawer('reader');
 
-  document.getElementById('btn-toggle-reader').onclick = () => {
-    openDrawer('reader');
-  };
+  const btnToggleReader = document.getElementById('btn-toggle-reader');
+  if (btnToggleReader) btnToggleReader.onclick = () => openDrawer('reader');
 
-  document.getElementById('btn-reset-demo').onclick = async () => {
-    if (confirm("是否重新加载科研工作流预置结构？")) {
-      location.reload();
+  const btnResetDemo = document.getElementById('btn-reset-demo');
+  if (btnResetDemo) {
+    btnResetDemo.onclick = async () => {
+      if (confirm("是否重新加载科研工作流预置结构？")) {
+        location.reload();
+      }
+    };
+  }
+
+  // ==========================================
+  // 模型与接口调度设置中心 (双引擎 & 服务商预设)
+  // ==========================================
+  const PROVIDER_PRESETS = {
+    siliconflow: {
+      name: '硅基流动',
+      api_base: 'https://api.siliconflow.cn/v1',
+      model: 'deepseek-ai/DeepSeek-V4-Pro',
+      vision_model: 'Qwen/Qwen2.5-VL-72B-Instruct',
+      hint: '服务商：硅基流动 · 适用 DeepSeek-V4 Pro (推理) + Qwen2.5-VL-72B (视觉)',
+      linkText: 'cloud.siliconflow.cn ↗',
+      linkUrl: 'https://cloud.siliconflow.cn/account/ak',
+      defaultKey: ''
+    },
+    dashscope: {
+      name: '阿里百炼',
+      api_base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen3.8-max',
+      vision_model: 'qwen-vl-max',
+      hint: '服务商：阿里百炼 · 适用 Qwen3.8-Max (推理) + qwen-vl-max (视觉)',
+      linkText: 'bailian.console.aliyun.com ↗',
+      linkUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
+      defaultKey: ''
+    },
+    deepseek: {
+      name: 'DeepSeek 官方',
+      api_base: 'https://api.deepseek.com/v1',
+      model: 'deepseek-chat',
+      vision_model: '',
+      hint: '服务商：DeepSeek 开放平台 · 适用 deepseek-chat / deepseek-reasoner',
+      linkText: 'platform.deepseek.com ↗',
+      linkUrl: 'https://platform.deepseek.com/api_keys',
+      defaultKey: ''
+    },
+    localproxy: {
+      name: '本地反代',
+      api_base: 'http://127.0.0.1:8046/v1',
+      model: 'gemini-3.8-flash-high',
+      vision_model: 'gemini-3.8-flash-high',
+      hint: '服务商：本地 Antigravity 代理 · 走本地端口，无需配置第三方 Key',
+      linkText: '',
+      linkUrl: '#',
+      defaultKey: 'sk-antigravity'
+    },
+    openai: {
+      name: 'OpenAI 官方',
+      api_base: 'https://api.openai.com/v1',
+      model: 'gpt-4o',
+      vision_model: 'gpt-4o',
+      hint: '服务商：OpenAI 官方 · 适用 GPT-4o / o1 / o3-mini',
+      linkText: 'platform.openai.com ↗',
+      linkUrl: 'https://platform.openai.com/api-keys',
+      defaultKey: ''
     }
   };
 
-  // 设置弹窗
-  document.getElementById('btn-open-settings').onclick = () => {
-    document.getElementById('cfg-api-base').value = currentConfig.api_base || 'http://127.0.0.1:8046/v1';
-    document.getElementById('cfg-model-select').value = currentConfig.model || 'gemini-3.8-flash-high';
+  function getSavedProviderKeys() {
+    try {
+      return JSON.parse(localStorage.getItem('axiomflow_provider_keys') || '{}');
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveProviderKey(providerKey, keyVal) {
+    if (!providerKey) return;
+    const keys = getSavedProviderKeys();
+    keys[providerKey] = (keyVal || '').trim();
+    localStorage.setItem('axiomflow_provider_keys', JSON.stringify(keys));
+  }
+
+  let currentActiveProvider = 'siliconflow';
+
+  function updatePresetButtonsState(api_base) {
+    const cleanBase = (api_base || '').trim().replace(/\/+$/, '');
+    let matchedKey = null;
+    document.querySelectorAll('.btn-preset-provider').forEach(btn => {
+      const pKey = btn.dataset.provider;
+      const p = PROVIDER_PRESETS[pKey];
+      if (p && cleanBase === p.api_base.replace(/\/+$/, '')) {
+        btn.classList.add('active');
+        matchedKey = pKey;
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+    if (matchedKey) {
+      currentActiveProvider = matchedKey;
+      updateProviderHintBar(matchedKey);
+    }
+  }
+
+  function updateProviderHintBar(pKey) {
+    const preset = PROVIDER_PRESETS[pKey];
+    const hintBar = document.getElementById('cfg-provider-hint-bar');
+    const hintText = document.getElementById('cfg-provider-hint-text');
+    const hintLink = document.getElementById('cfg-provider-link');
+    const keyStatus = document.getElementById('cfg-key-status');
+    if (!preset || !hintBar) return;
+
+    if (hintText) hintText.innerText = preset.hint;
+    if (hintLink) {
+      hintLink.innerText = preset.linkText;
+      hintLink.href = preset.linkUrl;
+      hintLink.style.display = preset.linkUrl === '#' ? 'none' : 'inline-flex';
+    }
+    if (keyStatus) {
+      if (pKey === 'localproxy') {
+        keyStatus.innerText = '免配 Key (自动就绪)';
+        keyStatus.style.color = '#38bdf8';
+      } else {
+        const savedKeys = getSavedProviderKeys();
+        const currentInputKey = (document.getElementById('cfg-api-key')?.value || '').trim();
+        const hasKey = !!(savedKeys[pKey] || currentInputKey || (currentConfig.api_key && currentConfig.api_base?.includes(pKey)));
+        keyStatus.innerText = hasKey ? '已记忆本地私钥 ✓' : '请粘贴 Key';
+        keyStatus.style.color = hasKey ? '#10b981' : '#f59e0b';
+      }
+    }
+  }
+
+  // 服务商快捷预设按钮点击
+  document.querySelectorAll('.btn-preset-provider').forEach(btn => {
+    btn.onclick = () => {
+      const pKey = btn.dataset.provider;
+      const preset = PROVIDER_PRESETS[pKey];
+      if (!preset) return;
+
+      currentActiveProvider = pKey;
+      document.getElementById('cfg-api-base').value = preset.api_base;
+
+      // 智能恢复该服务商已保存的专属 Key
+      const savedKeys = getSavedProviderKeys();
+      const apiKeyInput = document.getElementById('cfg-api-key');
+      if (apiKeyInput) {
+        if (savedKeys[pKey]) {
+          apiKeyInput.value = savedKeys[pKey];
+        } else if (pKey === 'localproxy') {
+          apiKeyInput.value = 'sk-antigravity';
+        } else {
+          apiKeyInput.value = '';
+        }
+      }
+
+      const modelSelect = document.getElementById('cfg-model-select');
+      const customBox = document.getElementById('cfg-custom-model-box');
+      const customInput = document.getElementById('cfg-custom-model-input');
+
+      let hasOption = false;
+      if (modelSelect) {
+        for (const opt of modelSelect.options) {
+          if (opt.value === preset.model) {
+            hasOption = true;
+            break;
+          }
+        }
+        if (hasOption) {
+          modelSelect.value = preset.model;
+          if (customBox) customBox.style.display = 'none';
+        } else {
+          modelSelect.value = '__custom__';
+          if (customBox) customBox.style.display = 'block';
+          if (customInput) customInput.value = preset.model;
+        }
+      }
+
+      const visionSelect = document.getElementById('cfg-vision-model-select');
+      if (visionSelect) {
+        visionSelect.value = preset.vision_model || '';
+      }
+
+      // 重置连通性状态框
+      const testStatusEl = document.getElementById('cfg-test-status');
+      if (testStatusEl) testStatusEl.style.display = 'none';
+
+      updatePresetButtonsState(preset.api_base);
+      updateProviderHintBar(pKey);
+    };
+  });
+
+  // 主模型下拉选择与自定义输入框联动
+  const modelSelectEl = document.getElementById('cfg-model-select');
+  const customBoxEl = document.getElementById('cfg-custom-model-box');
+  const customInputEl = document.getElementById('cfg-custom-model-input');
+  if (modelSelectEl) {
+    modelSelectEl.onchange = () => {
+      if (modelSelectEl.value === '__custom__') {
+        if (customBoxEl) customBoxEl.style.display = 'block';
+        if (customInputEl) customInputEl.focus();
+      } else {
+        if (customBoxEl) customBoxEl.style.display = 'none';
+      }
+    };
+  }
+
+  // 温度滑块与数值显示联动
+  const tempSlider = document.getElementById('cfg-temperature');
+  const tempVal = document.getElementById('cfg-temp-value');
+  if (tempSlider && tempVal) {
+    tempSlider.oninput = () => {
+      tempVal.innerText = tempSlider.value;
+    };
+  }
+
+  // 密码显示/隐藏切换
+  const btnToggleKey = document.getElementById('btn-toggle-key-visibility');
+  const apiKeyInput = document.getElementById('cfg-api-key');
+  if (btnToggleKey && apiKeyInput) {
+    btnToggleKey.onclick = () => {
+      const isPassword = apiKeyInput.type === 'password';
+      apiKeyInput.type = isPassword ? 'text' : 'password';
+      btnToggleKey.innerText = isPassword ? '🙈' : '👁️';
+    };
+  }
+
+  // 连通性测试
+  const btnTestConn = document.getElementById('btn-test-connection');
+  const testStatusEl = document.getElementById('cfg-test-status');
+  if (btnTestConn && testStatusEl) {
+    btnTestConn.onclick = async () => {
+      const api_base = document.getElementById('cfg-api-base').value.trim();
+      let model = modelSelectEl ? modelSelectEl.value : 'deepseek-ai/DeepSeek-V4-Pro';
+      if (model === '__custom__') {
+        model = (customInputEl?.value || '').trim() || 'deepseek-ai/DeepSeek-V4-Pro';
+      }
+      const api_key = (apiKeyInput?.value || '').trim() || currentConfig.api_key || '';
+
+      if (!api_base) {
+        alert("请输入接口基址 (API Base)");
+        return;
+      }
+
+      btnTestConn.disabled = true;
+      btnTestConn.innerHTML = '<span>⏳ 探测中...</span>';
+      testStatusEl.style.display = 'block';
+      testStatusEl.style.background = 'rgba(99, 102, 241, 0.12)';
+      testStatusEl.style.border = '1px solid rgba(99, 102, 241, 0.3)';
+      testStatusEl.style.color = '#c7d2fe';
+      testStatusEl.innerText = `⏳ 正在向 ${api_base} 发送探测请求 (模型: ${model})...`;
+
+      try {
+        const res = await fetch('/api/test-connection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_base, api_key, model })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          testStatusEl.style.background = 'rgba(16, 185, 129, 0.12)';
+          testStatusEl.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+          testStatusEl.style.color = '#34d399';
+          testStatusEl.innerText = `✅ ${data.message}`;
+          // 连通成功顺便记忆 Key
+          if (api_key && currentActiveProvider) {
+            saveProviderKey(currentActiveProvider, api_key);
+            updateProviderHintBar(currentActiveProvider);
+          }
+        } else {
+          testStatusEl.style.background = 'rgba(239, 68, 68, 0.12)';
+          testStatusEl.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+          testStatusEl.style.color = '#f87171';
+          testStatusEl.innerText = `❌ ${data.error}`;
+        }
+      } catch (err) {
+        testStatusEl.style.background = 'rgba(239, 68, 68, 0.12)';
+        testStatusEl.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        testStatusEl.style.color = '#f87171';
+        testStatusEl.innerText = `❌ 请求异常: ${err.message}`;
+      } finally {
+        btnTestConn.disabled = false;
+        btnTestConn.innerHTML = '<span>⚡ 测试连接</span>';
+      }
+    };
+  }
+
+  // 打开设置弹窗
+  const openSettingsHandler = () => {
+    const apiBase = currentConfig.api_base || 'https://api.siliconflow.cn/v1';
+    document.getElementById('cfg-api-base').value = apiBase;
+
+    // 智能恢复 Key
+    const savedKeys = getSavedProviderKeys();
+    if (apiKeyInput) {
+      let matchedPKey = 'siliconflow';
+      for (const [pk, p] of Object.entries(PROVIDER_PRESETS)) {
+        if (apiBase.includes(p.api_base.replace(/\/+$/, ''))) {
+          matchedPKey = pk;
+          break;
+        }
+      }
+      currentActiveProvider = matchedPKey;
+      if (savedKeys[matchedPKey]) {
+        apiKeyInput.value = savedKeys[matchedPKey];
+      } else if (currentConfig.api_key && currentConfig.api_key !== 'sk-antigravity') {
+        apiKeyInput.value = currentConfig.api_key;
+      } else if (matchedPKey === 'localproxy') {
+        apiKeyInput.value = 'sk-antigravity';
+      } else {
+        apiKeyInput.value = '';
+      }
+    }
+
+    // 渲染主模型
+    const model = currentConfig.model || 'deepseek-ai/DeepSeek-V4-Pro';
+    let hasOption = false;
+    if (modelSelectEl) {
+      for (const opt of modelSelectEl.options) {
+        if (opt.value === model) {
+          hasOption = true;
+          break;
+        }
+      }
+      if (hasOption) {
+        modelSelectEl.value = model;
+        if (customBoxEl) customBoxEl.style.display = 'none';
+      } else {
+        modelSelectEl.value = '__custom__';
+        if (customBoxEl) customBoxEl.style.display = 'block';
+        if (customInputEl) customInputEl.value = model;
+      }
+    }
+
+    // 渲染视觉模型
+    const visionSelect = document.getElementById('cfg-vision-model-select');
+    if (visionSelect) {
+      visionSelect.value = currentConfig.vision_model || '';
+    }
+
+    // 渲染温度
+    if (tempSlider && tempVal) {
+      const t = currentConfig.temperature !== undefined ? currentConfig.temperature : 0.3;
+      tempSlider.value = t;
+      tempVal.innerText = t;
+    }
+
+    if (testStatusEl) testStatusEl.style.display = 'none';
+
+    updatePresetButtonsState(apiBase);
     settingsModal.style.display = 'flex';
   };
+
+  const btnOpenSettings = document.getElementById('btn-open-settings');
+  if (btnOpenSettings) btnOpenSettings.onclick = openSettingsHandler;
+
+  const btnStatusPill = document.getElementById('btn-status-pill');
+  if (btnStatusPill) btnStatusPill.onclick = openSettingsHandler;
 
   document.getElementById('btn-close-settings').onclick = () => {
     settingsModal.style.display = 'none';
@@ -2376,10 +2903,20 @@ function setupEventListeners() {
 
   document.getElementById('btn-save-settings').onclick = async () => {
     const api_base = document.getElementById('cfg-api-base').value.trim();
-    const model = document.getElementById('cfg-model-select').value;
-    const api_key = document.getElementById('cfg-api-key').value.trim();
+    let model = modelSelectEl ? modelSelectEl.value : 'deepseek-ai/DeepSeek-V4-Pro';
+    if (model === '__custom__') {
+      model = (customInputEl?.value || '').trim() || 'deepseek-ai/DeepSeek-V4-Pro';
+    }
+    const vision_model = (document.getElementById('cfg-vision-model-select')?.value || '').trim();
+    const api_key = (apiKeyInput?.value || '').trim();
+    const temperature = parseFloat(tempSlider?.value || '0.3');
 
-    const payload = { api_base, model };
+    // 记忆该服务商的 Key
+    if (currentActiveProvider && api_key) {
+      saveProviderKey(currentActiveProvider, api_key);
+    }
+
+    const payload = { api_base, model, vision_model, temperature };
     if (api_key) payload.api_key = api_key;
 
     try {
@@ -2391,7 +2928,7 @@ function setupEventListeners() {
       const d = await res.json();
       if (d.ok) {
         currentConfig = d.config;
-        updateStatus(`已更新配置 · 模型: ${currentConfig.model}`);
+        updateStatus(formatModelStatusText(currentConfig));
         const inquiryModelEl = document.getElementById('inquiry-model-name');
         if (inquiryModelEl) inquiryModelEl.innerText = currentConfig.model;
         if (selectedNodeId) updateContextInspector();
@@ -2442,15 +2979,12 @@ function setupEventListeners() {
   }
 
   // 概念追问弹窗控制
-  document.getElementById('btn-close-inquiry').onclick = () => {
-    inquiryModal.style.display = 'none';
-  };
-  document.getElementById('btn-cancel-inquiry').onclick = () => {
-    inquiryModal.style.display = 'none';
-  };
-  document.getElementById('btn-submit-inquiry').onclick = () => {
-    submitConceptInquiry();
-  };
+  const btnCloseInquiry = document.getElementById('btn-close-inquiry');
+  if (btnCloseInquiry) btnCloseInquiry.onclick = () => { inquiryModal.style.display = 'none'; };
+  const btnCancelInquiry = document.getElementById('btn-cancel-inquiry');
+  if (btnCancelInquiry) btnCancelInquiry.onclick = () => { inquiryModal.style.display = 'none'; };
+  const btnSubmitInquiry = document.getElementById('btn-submit-inquiry');
+  if (btnSubmitInquiry) btnSubmitInquiry.onclick = () => { submitConceptInquiry(); };
 
   // 全屏卡片阅读弹窗控制
   const cardModal = document.getElementById('card-modal');
@@ -2677,6 +3211,24 @@ function initSelectionToolbar() {
   window.addEventListener('scroll', () => {
     toolbar.style.display = 'none';
   }, true);
+
+  // 快捷键 E (存为实证) 与 Q (追问概念)
+  document.addEventListener('keydown', (e) => {
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+      return;
+    }
+
+    if (toolbar.style.display === 'flex' && currentSelectionText) {
+      if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        btnMaterial.click();
+      } else if (e.key === 'q' || e.key === 'Q') {
+        e.preventDefault();
+        btnInquiry.click();
+      }
+    }
+  });
 }
 
 // 打开单卡片沉浸式全屏学术阅读
@@ -2855,6 +3407,20 @@ function deleteEdge(id) {
 }
 
 function updateStatus(text) {
+  // 实时更新顶部导航栏双模型调度胶囊状态
+  const reasoningEl = document.getElementById('status-reasoning-name');
+  if (reasoningEl && currentConfig.model) {
+    const raw = currentConfig.model;
+    const shortName = raw.includes('/') ? raw.split('/').pop() : raw;
+    reasoningEl.innerText = shortName;
+  }
+  const visionEl = document.getElementById('status-vision-name');
+  if (visionEl) {
+    const raw = currentConfig.vision_model || '自动路由';
+    const shortName = raw.includes('/') ? raw.split('/').pop() : raw;
+    visionEl.innerText = shortName;
+  }
+
   const el = document.getElementById('status-text');
   if (el) el.innerText = text;
 }

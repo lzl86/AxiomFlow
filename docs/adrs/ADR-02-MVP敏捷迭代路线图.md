@@ -92,7 +92,7 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     1. **[✅ 已达标]** 可在阅读器侧边一键拉出章节大纲树，点击“2.3 差分相衬显微成像实验结果”自动平滑滚动至第 49 页并激发光晕高亮；
     2. **[⏳ 待达标]** 针对该小节发起追问时，模型自动绑定目标页 $\pm 2$ 页的邻域上下文，1~2 秒内精准解答公式细节与参数定义。
 
-### 阶段 7: MVP 4.0 (多文献跨论文交叉比对与 Obsidian 双向水合 / Cross-Paper Graph & Knowledge Hydration) —— [顺延规划 · 文献资产底座已由 PR #1 跑通]
+### 阶段 7: MVP 4.0 (双引擎调度、国产/国际模型自由调度、密钥安全记忆与高帧率渲染架构) —— [✅ 已交付，参见 ADR-04 (PR #2)]
 *   **主场模块**：`public/materials/`, `server.py` (`/api/hydrate`, `/api/upload-material`), `public/app.js`
 *   **核心突破**：
     1. **多文献库管理 (Multi-Document Shelf) [✅ 基础上传与切换底座已由 PR #1 交付]**：支持在阅读器中自由上传本地 PDF/MD 文献（`POST /api/upload-material`），并通过下拉选择器自由切换，文献与课题会话（`session.activeDoc`）实现解耦隔离；后续进阶双栏并排比对；
