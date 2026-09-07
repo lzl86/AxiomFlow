@@ -94,8 +94,8 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     1. **[✅ 已达标]** 可在阅读器侧边一键拉出章节大纲树，点击“2.3 差分相衬显微成像实验结果”自动平滑滚动至第 49 页并激发光晕高亮；
     2. **[✅ 已达标]** 针对任意小节点击“探针”发起追问时，模型自动绑定目标页 $\pm 2$ 页的邻域上下文，1~2 秒内精准解答公式细节与学术内涵；卡片上点击来源徽章可反向毫秒级定位原文并触发光效脉冲。
 
-### 阶段 7: MVP 4.0 (双引擎自主调度、多文献融合与外部认知资产双向水合 / Obsidian 与 Web AI 对话流) —— [✅ 双引擎与高帧率渲染已交付(PR #2)，参见 ADR-04；多源水合顺延演进中]
-*   **主场模块**：`public/materials/`, `server.py` (`/api/test-connection`, `/api/hydrate`, `/api/upload-material`), `public/app.js`
+### 阶段 7: MVP 4.0 (双引擎自主调度、多文献融合与外部认知资产双向水合 / Obsidian 与 原生书签脚本直连 Web AI 对话) —— [✅ 双引擎与高帧率渲染已交付(PR #2)，参见 ADR-04；多源水合顺延演进中]
+*   **主场模块**：`public/materials/`, `server.py` (`/api/test-connection`, `/api/hydrate`, `/api/upload-material`, `/api/ingest-web-chat`), `public/app.js`
 *   **核心突破**：
     1. **双引擎自适应分发、密钥安全管理与 120Hz 硬件加速 [✅ PR #2 已交付，参见 ADR-04]**：
        * **双引擎路由解耦**：深度推理大模型（DeepSeek-V4 Pro / R1, Qwen3.8-Max 等）与视觉模型（Qwen2.5-VL-72B, qwen-vl-max 等）解耦，`resolve_vision_model` 守卫自动分发截框公式 OCR；
@@ -106,18 +106,23 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     4. **Obsidian 静态知识库与动态 DAG 画布双向水合 (Bidirectional Obsidian Hydration Pipeline)**：
        * **静态笔记 $\to$ 动态 DAG 拓扑反演**：输入任一 Obsidian 概念（如 `[[虚拟内存]]`），后端自动扫描解析其入链与出链依赖，在画布上一键展开为包含前置公理与衍生结论的局部因果子图；
        * **动态推演 $\to$ 结构化笔记结晶**：画布探究完成后，支持将当前有效祖先推演链路一键结晶导出为符合 Obsidian 规范、携带标准 Wikilinks 与学术锚点的复盘 Markdown 笔记，实现知识资产沉淀闭环。
-    5. **外部 AI 对话记录水合与问答因果拓扑化 (Web AI Chat Markdown Ingestion & Multi-Turn Decomposition)**：
-       * **跨平台科研探索接力**：用户在网页端（Gemini / Claude / ChatGPT）进行前沿发散探讨后，借助浏览器插件（如 *AI Exporter*）一键导出为结构化 `.md` 文件；AxiomFlow 提供专属文件拖拽与解析通道；
-       * **多轮会话结构化解构引擎 (Turn-based Parsing Engine)**：
-         * 正则嗅探会话中的角色标记（如 `# User` / `**Prompt:**` 与 `**Gemini:**`）、模型版本元信息（如 `Gemini 1.5 Pro` / `3.1 Pro`）与时间戳；
-         * 自动解构为规范因果拓扑单元：提问映射为 `Question`（探索课题卡片），回答映射为 `Conclusion`（结论卡片），内嵌的代码块自动剥离为独立的 `source_code`（源码公理实证卡片）；
-         * 自动构建有向因果链条：`Q1 ➔ A1 ➔ Q2 ➔ A2`，若对话中存在分支追问则自适应分叉成树；
-       * **原地入图与 Sugiyama 自动舒展**：导入完成后自动触发 Sugiyama 拓扑自动分层排布，用户可直接对导入内容剪除冗余分支、接入本地文献邻域切片，完成从“网页端发散提问”到“本地因果实证深推”的平滑过渡。
+    5. **原生书签脚本一键直连穿透摄入与 Web AI 问答因果拓扑化 (Native Zero-Install Bookmarklet & Direct Dialogue-to-DAG Pipeline)**：
+       * **零依赖直连架构 (方案 C · Zero-Install Ingestion)**：
+         * 坚守 Zero-Build 极简红线，**彻底摒弃重型浏览器扩展开发或对第三方插件维护周期的被动依赖**；
+         * AxiomFlow 在设置面板中提供一段轻量级原生 **JavaScript Bookmarklet（书签小工具）**，用户仅需一次性拖入浏览器书签栏；
+       * **跨域一键穿透直打 (Cross-Origin Direct Pipe)**：
+         * 用户在任意主流网页端（`gemini.google.com`, `chatgpt.com`, `claude.ai`）完成发散性提问后，直接点击浏览器书签栏上的【导入 AxiomFlow】；
+         * 书签脚本在浏览器上下文原地提取当前多轮问答流、角色标记与代码片段，通过 CORS 跨域通道瞬时 `POST` 推送至本地服务接口（`http://localhost:8765/api/ingest-web-chat`）；
+       * **多轮会话结构化解构引擎 (Turn-based Causal Decomposition)**：
+         * 自动解构为规范因果拓扑单元：提问映射为 `Question`（探索课题卡片），模型回答映射为 `Conclusion`（结论卡片），内嵌代码块自动剥离为独立的 `source_code`（源码公理实证卡片）；
+         * 自动构建有向因果链条：`Q1 ➔ A1 ➔ Q2 ➔ A2`，若对话存在分支追问则自适应分叉成树；
+       * **兜底兼容器 (Graceful Fallback)**：同步支持直接拖拽/粘贴外部导出的 Markdown 对话文本作为离线兜底通道；
+       * **原地入图与 Sugiyama 自动舒展**：接收到新会话流后，画布毫秒级挂载新卡片链并自动触发 Sugiyama 拓扑自动分层排布，用户可直接对导入节点剪除冗余分支、接入本地文献邻域切片或 GDB 探针，完成从“网页端发散提问”到“本地因果实证深推”的无缝接力。
 *   **验收标准**：
     1. **[✅ 已达标]** 切换至 DeepSeek-V4 Pro 推理时，框选公式切片能自动交由 Qwen2.5-VL-72B 解析；点击连通性测试 1 秒内回显延迟；画布节点拖拽达到 60~120fps 丝滑；
     2. **[⏳ 顺延中]** 系统能同时容纳多份 PDF 资产，并在单一画布上完成跨文献的有向因果连线与学术异同辨析；
     3. **[⏳ 顺延中]** 输入本地 Obsidian 笔记路径后，可在 0.5 秒内将其概念网水合展开为可视化的 DAG 推演分支；推演完毕可一键回写生成新笔记；
-    4. **[⏳ 规划中]** 支持将一份由插件导出的多轮 Gemini 对话 `.md` 文件直接拖入画布或通过菜单导入，1 秒内完成语法解构，自动生成对齐父子因果关系的卡片网络，且画布节点沿因果流向整齐排布、零重叠。
+    4. **[⏳ 规划中]** 用户在网页端 Gemini 完成长篇学术探讨后，点击浏览器书签栏中的 Bookmarklet，1 秒内本地 AxiomFlow 自动提示“已接收到外部 AI 会话”，并在当前课题画布中自动生成对齐父子因果关系的卡片网络，节点沿因果流向整齐排列、零重叠。
 
 ### 阶段 8: MVP 4.5 (数学物理数值仿真、形式化求解与微观系统原生沙盒 / Symbolic, Numeric, Formal & System Tracers) —— [规划中]
 *   **主场模块**：`server.py` (`/api/execute-tracer`, `/api/z3-solve`), `computational_backend/`, `public/app.js`
