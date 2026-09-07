@@ -120,6 +120,7 @@ function showToastNotification(htmlText, onUndo = null) {
 
 // 概念询问上下文缓存
 let inquiryParentNode = null;
+let neighborhoodActiveContext = null;
 
 const world = document.getElementById('canvas-world');
 const svgEdges = document.getElementById('svg-edges');
@@ -254,7 +255,7 @@ function startVersionPolling() {
                 setTimeout(() => el.classList.remove('probe-halo'), 3600);
               }
             });
-            updateStatus(`⚡ 检测到外部 GDB 硬件探针入图: ${newProbes[0].title || newProbes[0].id}`);
+            updateStatus(`检测到外部 GDB 硬件探针入图: ${newProbes[0].title || newProbes[0].id}`);
           }, 80);
         }
       } else if (!lastMtime) {
@@ -336,9 +337,9 @@ function createNodeElement(node) {
 
   let statusBadge = '';
   if (isGenerating) {
-    statusBadge = `<span style="color: #38bdf8; font-size: 11px;">⏳ 正在推理...</span>`;
+    statusBadge = `<span style="color: #38bdf8; font-size: 11px;">推理中</span>`;
   } else if (node.status === 'pending') {
-    statusBadge = `<span style="color: #f59e0b; font-size: 11px;">● 待生成</span>`;
+    statusBadge = `<span style="color: #f59e0b; font-size: 11px;">待生成</span>`;
   }
 
   const incomingCount = (graph.edges || []).filter(e => e.target === node.id).length;
@@ -346,6 +347,12 @@ function createNodeElement(node) {
     ? `流入依赖 (${incomingCount} 条) · 点击管理断线，或按住向左拖出以拔除连线`
     : `上下文流入 (在此释放连线)`;
   const inPortClass = incomingCount > 0 ? 'port in has-incoming' : 'port in';
+
+  const anchorBadgeHtml = node.source_anchor ? `
+    <div class="node-source-anchor-badge" onclick="window.jumpToNodeSourceAnchor('${node.id}', event)" title="点击直达文献原文物理页码并高亮切片">
+      [${node.source_anchor.doc_name ? escapeHtml(node.source_anchor.doc_name).slice(0, 14) + '... · ' : ''}P.${node.source_anchor.page_range ? (node.source_anchor.page_range[0] + '-' + node.source_anchor.page_range[1]) : (node.source_anchor.target_page || '')} · 跳转查阅]
+    </div>
+  ` : '';
 
   div.innerHTML = `
     <div class="${inPortClass}" data-port="in" data-node="${node.id}" title="${inPortTitle}"></div>
@@ -365,21 +372,21 @@ function createNodeElement(node) {
     <div class="node-content">
       ${node.kind === 'material' 
         ? `${node.imageUrl ? `<div style="margin-bottom: 8px; text-align: center; background: #ffffff; padding: 4px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 2px 8px rgba(0,0,0,0.5);"><img src="${node.imageUrl}" style="max-width: 100%; max-height: 180px; object-fit: contain; display: block; margin: 0 auto;" alt="原版公式切片"></div>` : ''}
-           ${node.ocrStatus === 'pending' ? `<div style="font-size: 11px; color: #38bdf8; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; background: rgba(56, 189, 248, 0.1); padding: 3px 6px; border-radius: 4px; border: 1px dashed rgba(56, 189, 248, 0.4);"><span>⏳ 正在由 Gemini 反编译公式...</span><button onclick="retryOcrFormula('${node.id}', event)" class="btn" style="padding: 1px 6px; font-size: 10px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.5);" title="若时间过长可点击重试">重试</button></div>` : ''}
-           ${node.ocrStatus === 'failed' ? `<div style="font-size: 11px; color: #f87171; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; background: rgba(239, 68, 68, 0.1); padding: 3px 6px; border-radius: 4px; border: 1px dashed rgba(239, 68, 68, 0.4);"><span>⚠️ 反编译未完成</span><button onclick="retryOcrFormula('${node.id}', event)" class="btn" style="padding: 1px 6px; font-size: 10px; background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5);">重新解析</button></div>` : ''}
+           ${node.ocrStatus === 'pending' ? `<div style="font-size: 11px; color: #38bdf8; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; background: rgba(56, 189, 248, 0.1); padding: 3px 6px; border-radius: 4px; border: 1px dashed rgba(56, 189, 248, 0.4);"><span>正在反编译公式...</span><button onclick="retryOcrFormula('${node.id}', event)" class="btn" style="padding: 1px 6px; font-size: 10px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.5);" title="若时间过长可点击重试">重试</button></div>` : ''}
+           ${node.ocrStatus === 'failed' ? `<div style="font-size: 11px; color: #f87171; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; background: rgba(239, 68, 68, 0.1); padding: 3px 6px; border-radius: 4px; border: 1px dashed rgba(239, 68, 68, 0.4);"><span>反编译未完成</span><button onclick="retryOcrFormula('${node.id}', event)" class="btn" style="padding: 1px 6px; font-size: 10px; background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5);">重新解析</button></div>` : ''}
            <blockquote>${renderMarkdown(node.excerpt || node.content || '')}</blockquote>
-           ${node.citation ? `<div class="citation-chip">📖 ${escapeHtml(node.citation)}</div>` : ''}`
+           ${node.citation ? `<div class="citation-chip">出处: ${escapeHtml(node.citation)}</div>` : ''}`
         : node.kind === 'source_code'
         ? `<div class="code-block-wrapper" style="margin-top: 0; margin-bottom: 6px;">
              <div class="code-block-header">
                <span class="code-lang-tag">${escapeHtml((node.language || 'c').toUpperCase())}</span>
-               <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">📋 复制</button>
+               <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">复制</button>
              </div>
              <pre class="code-pre" style="max-height: 180px;">${highlightCode(node.code || node.content || '', node.language || 'c')}</pre>
            </div>
-           ${node.citation ? `<div class="citation-chip">📖 ${escapeHtml(node.citation)}</div>` : ''}`
+           ${node.citation ? `<div class="citation-chip">出处: ${escapeHtml(node.citation)}</div>` : ''}`
         : node.kind === 'hardware_probe'
-        ? `${node.location ? `<div class="probe-loc-badge">📍 ${escapeHtml(node.location)}</div>` : ''}
+        ? `${node.location ? `<div class="probe-loc-badge">断点: ${escapeHtml(node.location)}</div>` : ''}
            <div class="probe-grid-label"><span>16 通用寄存器快照</span><span style="color: #64748b; font-size: 10px;">x86-64</span></div>
            <div class="reg-grid" style="margin-bottom: 6px;">
              ${renderRegistersHtml(node.registers)}
@@ -388,9 +395,10 @@ function createNodeElement(node) {
              <div class="probe-grid-label"><span>反汇编指令流 ($pc)</span></div>
              <div class="disasm-box">${formatDisassemblyHtml(node.disassembly)}</div>
            ` : ''}
-           ${node.notes ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 6px; font-style: italic;">💬 ${escapeHtml(node.notes)}</div>` : ''}`
-        : `<div class="card-question-text" style="font-weight: 600; color: var(--text-primary); line-height: 1.45; cursor: text;" title="点击可直接在右侧面板编辑问题">${renderMarkdown(node.question || '<em>(点击在此输入具体科研问题...)</em>')}</div>
-           <div class="markdown-body" style="margin-top: 8px;">${isGenerating ? '<span style="color: #38bdf8;">🧠 大模型正在深度严密推演中...</span>' : renderMarkdown(node.response || '(点击右侧请求生成)')}</div>`
+           ${node.notes ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 6px; font-style: italic;">备注: ${escapeHtml(node.notes)}</div>` : ''}`
+        : `${anchorBadgeHtml}
+           <div class="card-question-text" style="font-weight: 600; color: var(--text-primary); line-height: 1.45; cursor: text;" title="点击可直接在右侧面板编辑问题">${renderMarkdown(node.question || '<em>(点击在此输入具体科研问题...)</em>')}</div>
+           <div class="markdown-body" style="margin-top: 8px;">${isGenerating ? '<span style="color: #38bdf8;">模型正在深度严密推演中...</span>' : renderMarkdown(node.response || '(点击右侧请求生成)')}</div>`
       }
     </div>
     <div class="node-footer">
@@ -566,7 +574,7 @@ function renderEdges() {
       const sTitle = sNode ? (sNode.title || sNode.id) : edge.source;
       const tTitle = tNode ? (tNode.title || tNode.id) : edge.target;
       deleteEdge(edge.id);
-      showToastNotification(`✂️ 已剪断依赖：<strong>${escapeHtml(sTitle)}</strong> ➔ <strong>${escapeHtml(tTitle)}</strong>`, () => {
+      showToastNotification(`已剪断依赖：<strong>${escapeHtml(sTitle)}</strong> ➔ <strong>${escapeHtml(tTitle)}</strong>`, () => {
         undoGraph();
       });
     });
@@ -763,7 +771,7 @@ function updateContextInspector() {
     <!-- 节点即时输入/编辑区 -->
     <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <span style="font-size: 11px; font-weight: 700; color: #818cf8; text-transform: uppercase;">✏️ 课题即时编辑</span>
+        <span style="font-size: 11px; font-weight: 700; color: #818cf8; text-transform: uppercase;">课题即时编辑</span>
         <span style="font-size: 11px; color: #64748b; font-family: monospace;">ID: <code>${node.id}</code></span>
       </div>
 
@@ -846,29 +854,29 @@ function updateContextInspector() {
     <!-- 核心操作区（置顶优先展示，无需下滚查找） -->
     <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px;">
       <button id="btn-trigger-generate" class="btn btn-primary" style="justify-content: center; padding: 10px; font-size: 13px; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);">
-        🚀 调用 ${escapeHtml(currentConfig.model)} 原地生成解答
+        调用 ${escapeHtml(currentConfig.model)} 原地生成解答
       </button>
       
       <button id="btn-open-inquiry" class="btn" style="justify-content: center; background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: #34d399; padding: 8px; font-size: 12.5px;">
-        💡 追问特定概念 / 展开新分支节点
+        追问特定概念 / 展开新分支节点
       </button>
 
       ${node.imageUrl ? `
-      <button id="btn-re-ocr" class="btn btn-secondary" style="justify-content: center; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.4); color: #fde68a; padding: 8px; font-size: 12.5px;" title="重新请求 Gemini 多模态模型解析截取图中的 LaTeX 公式与变量">
-        📐 提取/反编译原图中的 LaTeX 公式与释义
+      <button id="btn-re-ocr" class="btn btn-secondary" style="justify-content: center; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.4); color: #fde68a; padding: 8px; font-size: 12.5px;" title="重新请求视觉模型解析截取图中的 LaTeX 公式与变量">
+        反编译提取原图中的 LaTeX 公式与释义
       </button>
       ` : ''}
     </div>
 
     <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; font-size: 11.5px; line-height: 1.45; color: var(--text-primary);">
-      <span style="color: #38bdf8; font-weight: 600;">⚡ 物理级拓扑隔离：</span>
+      <span style="color: #38bdf8; font-weight: 600;">物理拓扑隔离：</span>
       仅连入的有效祖先进入 Prompt，剪断分支在 HTTP 请求中被 100% 物理剥离。
     </div>
 
     <!-- 精准 Prompt 折叠查看区（小巧精悍，不挤占界面） -->
     <details open style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px;">
       <summary style="font-size: 12px; font-weight: 600; color: var(--text-secondary); cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-        <span>🔍 接收的精准 Prompt 预估 (<span id="prompt-token-count">${compiled.estimatedTokens} tokens</span>)</span>
+        <span>接收的精准 Prompt 预估 (<span id="prompt-token-count">${compiled.estimatedTokens} tokens</span>)</span>
         <button id="btn-copy-prompt" class="btn" style="padding: 2px 8px; font-size: 10.5px;">复制纯净输入</button>
       </summary>
       <div class="prompt-preview-box" style="margin-top: 8px; max-height: 150px;">${escapeHtml(compiled.fullText)}</div>
@@ -927,7 +935,7 @@ function updateContextInspector() {
       if (liveNode) {
         liveNode.location = e.target.value;
         const locBadge = document.querySelector(`.node[data-id="${node.id}"] .probe-loc-badge`);
-        if (locBadge) locBadge.innerText = `📍 ${liveNode.location}`;
+        if (locBadge) locBadge.innerText = `断点: ${liveNode.location}`;
       }
       debouncedSave();
     };
@@ -987,7 +995,7 @@ function updateContextInspector() {
       if (liveNode) {
         liveNode.citation = e.target.value;
         const chip = document.querySelector(`.node[data-id="${node.id}"] .citation-chip`);
-        if (chip) chip.innerText = `📖 ${liveNode.citation}`;
+        if (chip) chip.innerText = `出处: ${liveNode.citation}`;
       }
       debouncedSave();
     };
@@ -1035,7 +1043,7 @@ async function generateAnswerForNode(node) {
   const btn = document.getElementById('btn-trigger-generate');
   if (btn) {
     btn.disabled = true;
-    btn.innerText = `⏳ 正在调用 ${currentConfig.model} 深度推演中...`;
+    btn.innerText = `正在调用 ${currentConfig.model} 深度推演中...`;
   }
 
   node.status = 'generating';
@@ -1060,7 +1068,7 @@ async function generateAnswerForNode(node) {
       liveNode.response = data.response;
       liveNode.status = 'done';
       if (data.mtime) lastMtime = data.mtime;
-      updateStatus(`[完成] ${currentConfig.model} 已为 #${node.id} 生成解答`);
+      updateStatus(`${currentConfig.model} 已为 #${node.id} 生成解答`);
     } else {
       alert("生成失败: " + (data.error || "未知异常"));
       liveNode.status = 'idle';
@@ -1116,6 +1124,13 @@ function extractConceptsFromNode(node) {
 // 打开“概念询问与展开”对话框
 function openConceptInquiryModal(node, initialConcept = null) {
   inquiryParentNode = node;
+  neighborhoodActiveContext = null;
+  const banner = document.getElementById('inquiry-neighborhood-banner');
+  if (banner) banner.style.display = 'none';
+
+  const headingEl = document.getElementById('inquiry-modal-heading');
+  if (headingEl) headingEl.innerText = '针对上游论断展开概念询问';
+
   document.getElementById('inquiry-parent-title').innerText = `来源节点: #${node.id} - ${node.title || node.question}`;
 
   const chipsContainer = document.getElementById('concept-chips-container');
@@ -1160,7 +1175,13 @@ function openConceptInquiryModal(node, initialConcept = null) {
 
 // 提交概念询问并生成新分支
 async function submitConceptInquiry() {
-  if (!inquiryParentNode) return;
+  const isNeighborhood = Boolean(neighborhoodActiveContext);
+  let parentNode = inquiryParentNode;
+  if (!parentNode && isNeighborhood) {
+    parentNode = graph.nodes.length > 0 ? graph.nodes[0] : null;
+  }
+  if (!parentNode && !isNeighborhood) return;
+
   const textarea = document.getElementById('inquiry-question-input');
   const userQuestion = textarea.value.trim();
 
@@ -1169,16 +1190,19 @@ async function submitConceptInquiry() {
     return;
   }
 
-  let newTitle = "深入追问";
+  let newTitle = isNeighborhood ? "文献邻域研读" : "深入追问";
   const matched = userQuestion.match(/【([^】]+)】/);
   if (matched) {
-    newTitle = `概念追问：${matched[1]}`;
+    newTitle = isNeighborhood ? `邻域研读：${matched[1]}` : `概念追问：${matched[1]}`;
   } else {
-    newTitle = userQuestion.slice(0, 16) + (userQuestion.length > 16 ? '...' : '');
+    newTitle = userQuestion.slice(0, 18) + (userQuestion.length > 18 ? '...' : '');
   }
 
   const newId = `n_inquiry_${Date.now()}`;
   const shouldAutoAsk = document.getElementById('inquiry-auto-ask').checked;
+
+  const posX = parentNode ? parentNode.x + 460 : 320;
+  const posY = parentNode ? parentNode.y + (Math.random() * 60 - 30) : 220;
 
   const newNode = {
     id: newId,
@@ -1187,17 +1211,28 @@ async function submitConceptInquiry() {
     question: userQuestion,
     response: '',
     status: shouldAutoAsk ? 'generating' : 'idle',
-    x: inquiryParentNode.x + 460,
-    y: inquiryParentNode.y + (Math.random() * 80 - 40)
+    x: posX,
+    y: posY
   };
 
+  if (isNeighborhood && neighborhoodActiveContext) {
+    newNode.source_anchor = {
+      doc_name: neighborhoodActiveContext.doc_name,
+      page_range: neighborhoodActiveContext.page_range,
+      target_page: neighborhoodActiveContext.target_page,
+      chapterTitle: neighborhoodActiveContext.chapterTitle
+    };
+  }
+
   graph.nodes.push(newNode);
-  graph.edges.push({
-    id: `e_${Date.now()}`,
-    source: inquiryParentNode.id,
-    target: newId,
-    kind: 'solid'
-  });
+  if (parentNode) {
+    graph.edges.push({
+      id: `e_${Date.now()}`,
+      source: parentNode.id,
+      target: newId,
+      kind: 'solid'
+    });
+  }
 
   saveGraph();
   renderNodes();
@@ -1205,21 +1240,32 @@ async function submitConceptInquiry() {
   selectNode(newId);
   inquiryModal.style.display = 'none';
 
+  const boundNeighborhoodCtx = neighborhoodActiveContext ? { ...neighborhoodActiveContext } : null;
+  neighborhoodActiveContext = null;
+  const banner = document.getElementById('inquiry-neighborhood-banner');
+  if (banner) banner.style.display = 'none';
+
   if (shouldAutoAsk) {
     const partition = partitionContext(newId, graph.nodes, graph.edges);
     const compiled = compilePrompt(partition);
     updateStatus(`正在请求 ${currentConfig.model} 为新分支生成解答...`);
 
     try {
+      const genPayload = {
+        nodeId: newId,
+        prompt: compiled.fullText,
+        model: currentConfig.model,
+        sessionId: currentSessionId
+      };
+      if (boundNeighborhoodCtx) {
+        genPayload.neighborhood_context = boundNeighborhoodCtx;
+        genPayload.source_anchor = newNode.source_anchor;
+      }
+
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nodeId: newId,
-          prompt: compiled.fullText,
-          model: currentConfig.model,
-          sessionId: currentSessionId
-        })
+        body: JSON.stringify(genPayload)
       });
       const data = await res.json();
       const liveNode = graph.nodes.find(n => n.id === newId) || newNode;
@@ -1227,7 +1273,7 @@ async function submitConceptInquiry() {
         liveNode.response = data.response;
         liveNode.status = 'done';
         if (data.mtime) lastMtime = data.mtime;
-        updateStatus(`[完成] 新分支 #${newId} 已生成`);
+        updateStatus(`新分支 #${newId} 已生成`);
       } else {
         liveNode.status = 'idle';
         alert("生成失败: " + data.error);
@@ -1441,8 +1487,7 @@ function renderDocSelectorOptions() {
     opt.dataset.type = m.type;
     opt.dataset.name = m.name;
     opt.dataset.title = m.title;
-    const icon = m.type === 'pdf' ? '📄' : '📝';
-    opt.innerText = `${icon} ${m.name}`;
+    opt.innerText = m.name;
     if (activeUrl && (activeUrl === m.url || activeUrl.endsWith(encodeURIComponent(m.name)) || activeUrl.endsWith(m.name))) {
       opt.selected = true;
     }
@@ -1500,7 +1545,7 @@ async function restoreSessionActiveDoc() {
 async function handleUploadMaterialFile(file) {
   if (!file) return;
   try {
-    updateStatus(`正在上传文献【${file.name}】...`);
+    updateStatus(`正在上传文献《${file.name}》...`);
     const reader = new FileReader();
     reader.onload = async (e) => {
       const base64Data = e.target.result.split(',')[1];
@@ -1517,7 +1562,7 @@ async function handleUploadMaterialFile(file) {
         await loadMaterialsCatalog();
         await switchActiveDocument(data.material, true);
         openDrawer('reader');
-        updateStatus(`✅ 文献【${data.material.name}】已成功上传并绑定至当前课题！`);
+        updateStatus(`文献《${data.material.name}》已成功上传并绑定至当前课题`);
       } else {
         alert("上传文献失败: " + (data.error || "未知错误"));
       }
@@ -1701,7 +1746,7 @@ function renderOutlineTree(outlineItems) {
   treeContainer.innerHTML = '';
 
   if (!outlineItems || outlineItems.length === 0) {
-    treeContainer.innerHTML = '<div style="color: #64748b; padding: 12px; text-align: center;">该文献未包含书签目录</div>';
+    treeContainer.innerHTML = '<div style="color: #64748b; padding: 12px; text-align: center;">该文献未包含书签目录，可点击右上角 [AI 骨架] 提取</div>';
     return;
   }
 
@@ -1716,8 +1761,19 @@ function renderOutlineTree(outlineItems) {
 
     row.innerHTML = `
       <span class="outline-item-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span>
-      ${item.pageNum ? `<span class="outline-page-badge">P.${item.pageNum}</span>` : ''}
+      <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+        ${item.pageNum ? `<button class="outline-item-probe" title="对该章节所在页 (P.${item.pageNum} ± 2) 执行邻域切片研读">探针</button>` : ''}
+        ${item.pageNum ? `<span class="outline-page-badge">P.${item.pageNum}</span>` : ''}
+      </div>
     `;
+
+    const probeBtn = row.querySelector('.outline-item-probe');
+    if (probeBtn) {
+      probeBtn.onclick = (e) => {
+        e.stopPropagation();
+        openNeighborhoodInquiry(item.pageNum, item.title);
+      };
+    }
 
     row.onclick = (e) => {
       e.stopPropagation();
@@ -1754,7 +1810,7 @@ function renderFallbackOutline(numPages) {
   if (!treeContainer) return;
   treeContainer.innerHTML = `
     <div style="padding: 10px 8px; color: #94a3b8; font-size: 11.5px; line-height: 1.5;">
-      <p style="margin-bottom: 8px; color: #cbd5e1;">⚠️ 该 PDF 未内置书签大纲，可通过以下常用分页快速跳转：</p>
+      <p style="margin-bottom: 8px; color: #cbd5e1;">该文献未内置书签大纲，可点击上方“AI 骨架”解析或按分页跳转：</p>
       <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;">
         ${Array.from({ length: Math.min(10, Math.ceil(numPages / 10)) }, (_, i) => {
           const p = i === 0 ? 1 : i * 10;
@@ -1765,12 +1821,231 @@ function renderFallbackOutline(numPages) {
   `;
 }
 
+// 扁平大纲层级树嵌套算法
+function buildNestedOutline(flatItems) {
+  if (!flatItems || flatItems.length === 0) return [];
+  const root = [];
+  const stack = [];
+  flatItems.forEach(raw => {
+    const node = {
+      title: raw.title ? raw.title.trim() : '未命名章节',
+      pageNum: raw.page || raw.pageNum || null,
+      items: []
+    };
+    const level = raw.level || 1;
+    while (stack.length > 0 && stack[stack.length - 1].level >= level) {
+      stack.pop();
+    }
+    if (stack.length === 0) {
+      root.push(node);
+    } else {
+      stack[stack.length - 1].node.items.push(node);
+    }
+    stack.push({ level, node });
+  });
+  return root;
+}
+
+// 服务端原生/AI大纲骨架请求
+async function requestAiOutline(aiFallback = false) {
+  const treeContainer = document.getElementById('pdf-outline-tree');
+  if (!treeContainer) return;
+  const docSelector = document.getElementById('doc-selector');
+  let docName = '';
+  if (graph.activeDoc && (graph.activeDoc.name || graph.activeDoc.title)) {
+    docName = graph.activeDoc.name || graph.activeDoc.title;
+  }
+  if (!docName && docSelector && docSelector.value) {
+    docName = decodeURIComponent(docSelector.value.split('/').pop());
+  }
+  if (!docName) {
+    updateStatus('请先在阅读器中载入文献资产');
+    return;
+  }
+  treeContainer.innerHTML = '<div style="color: #64748b; padding: 12px; text-align: center;">正在通过服务端解析大纲骨架...</div>';
+  try {
+    const res = await fetch('/api/paper-outline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_name: docName, ai_fallback: aiFallback })
+    });
+    const data = await res.json();
+    if (data.ok && data.outline && data.outline.length > 0) {
+      currentPdfOutline = buildNestedOutline(data.outline);
+      renderOutlineTree(currentPdfOutline);
+      updateStatus(`大纲骨架已就绪 (${data.source === 'native' ? '原生书签' : (data.source === 'ai' ? 'AI 提取' : '文档结构')}, 共 ${data.outline.length} 项)`);
+    } else {
+      updateStatus('未能提取到大纲结构');
+      if (currentPdfDoc) renderFallbackOutline(currentPdfDoc.numPages);
+    }
+  } catch (err) {
+    console.error('提取大纲失败:', err);
+    updateStatus(`提取大纲失败: ${err.message}`);
+  }
+}
+window.requestAiOutline = requestAiOutline;
+
+// 邻域切片学术概念快速提取
+function extractConceptsFromExcerpt(text) {
+  if (!text) return [];
+  const found = new Set();
+
+  const bracketMatches = text.match(/[【《“"']([^【】《》“”"'\n\r]{2,20})[】》”"']/g) || [];
+  bracketMatches.forEach(m => {
+    const clean = m.replace(/[【】《》“”"']/g, '').trim();
+    if (clean.length >= 2 && clean.length <= 16) found.add(clean);
+  });
+
+  const symbolMatches = text.match(/\b([A-Z]{2,6}|NA|OTF|PTF|ATF|PSF|DPC|QPI|TIE|DoP)\b/g) || [];
+  symbolMatches.forEach(s => found.add(s));
+
+  const termRegex = /([\u4e00-\u9fa5]{2,8}(?:成像|调制|相衬|显微|算法|矩阵|函数|积分|滤波器|衍射|光瞳|分辨率|相位|光强|波前|色差|照明|方程|卷积|反演|层析))/g;
+  let match;
+  while ((match = termRegex.exec(text)) !== null) {
+    if (match[1] && match[1].length >= 3 && match[1].length <= 10) {
+      found.add(match[1]);
+    }
+  }
+
+  const stopWords = new Set(['本章小结', '实验结果', '研究内容', '国内外研究', '主要工作', '本节介绍']);
+  const result = Array.from(found).filter(item => !stopWords.has(item));
+  return result.slice(0, 10);
+}
+
+// 打开“文献邻域探针研读”对话框
+async function openNeighborhoodInquiry(targetPage, chapterTitle = null) {
+  const docSelector = document.getElementById('doc-selector');
+  let docName = '';
+  if (graph.activeDoc && (graph.activeDoc.name || graph.activeDoc.title)) {
+    docName = graph.activeDoc.name || graph.activeDoc.title;
+  }
+  if (!docName && docSelector && docSelector.value) {
+    docName = decodeURIComponent(docSelector.value.split('/').pop());
+  }
+  if (!docName) {
+    alert('请先在文献阅读器中选择或载入文献资产！');
+    return;
+  }
+  const page = targetPage || currentPdfPageNum || 1;
+  updateStatus(`正在提取文献《${docName}》第 P.${page} 页前后邻域物理切片...`);
+
+  try {
+    const res = await fetch('/api/paper-neighborhood', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        doc_name: docName,
+        page: page,
+        window: 2
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(data.error || '提取切片失败');
+    }
+
+    neighborhoodActiveContext = {
+      doc_name: data.doc_name,
+      target_page: data.target_page,
+      page_range: data.page_range,
+      excerpt: data.excerpt,
+      char_count: data.char_count,
+      total_pages: data.total_pages,
+      chapterTitle: chapterTitle
+    };
+
+    const headingEl = document.getElementById('inquiry-modal-heading');
+    if (headingEl) headingEl.innerText = chapterTitle ? `针对章节【${chapterTitle}】展开邻域研读` : `针对第 P.${page} 页展开邻域研读`;
+
+    const parentTitleEl = document.getElementById('inquiry-parent-title');
+    if (parentTitleEl) parentTitleEl.innerText = `文献: ${data.doc_name} · 物理切片: P.${data.page_range[0]}-${data.page_range[1]}`;
+
+    const banner = document.getElementById('inquiry-neighborhood-banner');
+    if (banner) {
+      banner.style.display = 'block';
+      const targetEl = document.getElementById('neighborhood-banner-target');
+      if (targetEl) targetEl.innerText = `P.${data.target_page} ± 2 (P.${data.page_range[0]}-${data.page_range[1]})`;
+      const charsEl = document.getElementById('neighborhood-banner-chars');
+      if (charsEl) charsEl.innerText = `${data.char_count.toLocaleString()} 字符`;
+      const docEl = document.getElementById('neighborhood-banner-doc');
+      if (docEl) docEl.innerText = `文献: ${data.doc_name}${chapterTitle ? ' · 章节: ' + chapterTitle : ''}`;
+    }
+
+    const concepts = extractConceptsFromExcerpt(data.excerpt);
+    const chipsContainer = document.getElementById('concept-chips-container');
+    chipsContainer.innerHTML = '';
+    if (concepts.length === 0) {
+      chipsContainer.innerHTML = '<span style="font-size: 11px; color: #64748b;">(未自动提取到特征词，请在下方自由输入)</span>';
+    } else {
+      concepts.forEach(c => {
+        const chip = document.createElement('div');
+        chip.className = 'neighborhood-concept-chip';
+        chip.innerText = `+ ${c}`;
+        chip.title = `点击填入关于【${c}】的探针问题`;
+        chip.onclick = () => {
+          const textarea = document.getElementById('inquiry-question-input');
+          textarea.value = `基于文献 P.${data.page_range[0]}-${data.page_range[1]} 原文切片，深入剖析【${c}】的物理机理、数学推导与实验参数。`;
+          textarea.focus();
+        };
+        chipsContainer.appendChild(chip);
+      });
+    }
+
+    const textarea = document.getElementById('inquiry-question-input');
+    const defaultTopic = chapterTitle || (concepts.length > 0 ? concepts[0] : `第 P.${page} 页核心推论`);
+    textarea.value = `基于文献 P.${data.page_range[0]}-${data.page_range[1]} 物理原文切片，深入剖析【${defaultTopic}】的理论推导与实验实证结论。`;
+
+    inquiryParentNode = null;
+    if (selectedNodeId) {
+      const liveSelected = graph.nodes.find(n => n.id === selectedNodeId);
+      if (liveSelected) inquiryParentNode = liveSelected;
+    }
+
+    inquiryModal.style.display = 'flex';
+    setTimeout(() => {
+      textarea.focus();
+    }, 100);
+
+    updateStatus(`邻域切片 P.${data.page_range[0]}-${data.page_range[1]} 已挂载至研读探针`);
+  } catch (err) {
+    console.error('获取邻域切片失败:', err);
+    alert(`获取文献邻域物理切片失败: ${err.message}`);
+    updateStatus(`邻域切片提取失败: ${err.message}`);
+  }
+}
+window.openNeighborhoodInquiry = openNeighborhoodInquiry;
+
+// 卡片文献切片点击直达跳转与高亮
+window.jumpToNodeSourceAnchor = async function(nodeId, event) {
+  if (event) event.stopPropagation();
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node || !node.source_anchor) return;
+  const sa = node.source_anchor;
+
+  const drawer = document.getElementById('drawer');
+  if (drawer && !drawer.classList.contains('open')) {
+    openDrawer('reader');
+  } else {
+    const readerTabBtn = document.querySelector('.drawer-tab[data-tab="reader"]');
+    if (readerTabBtn) readerTabBtn.click();
+  }
+
+  const docItem = materialsCatalog.find(m => m.name === sa.doc_name || m.title === sa.doc_name);
+  if (docItem && (!graph.activeDoc || graph.activeDoc.name !== docItem.name)) {
+    await switchActiveDocument(docItem, false);
+  }
+
+  const targetPage = sa.target_page || (sa.page_range && sa.page_range[0]) || 1;
+  setTimeout(() => {
+    jumpToOutlinePage(targetPage);
+  }, 160);
+};
+
 // 点击目录大纲平滑跳转并光效高亮目标页
 function jumpToOutlinePage(pageNum) {
   if (!currentPdfDoc) return;
   scrollToPage(pageNum, true);
 
-  // 光效高亮目标页 1.5 秒
   setTimeout(() => {
     const slot = document.getElementById(`pdf-slot-${pageNum}`);
     if (slot) {
@@ -2170,7 +2445,7 @@ window.extractSelectedToCanvas = () => {
   selectNode(newId);
   toolbar.style.display = 'none';
   window.getSelection()?.removeAllRanges();
-  updateStatus(`[已摘录] 事实素材已引入画布: ${citation}`);
+  updateStatus(`事实素材已成功引入画布: ${citation}`);
 };
 
 // 整篇文档或当前页一键存为实证节点
@@ -2240,7 +2515,7 @@ function setupPdfSnipper() {
       const scrollHeight = viewContainer ? viewContainer.scrollHeight : 2000;
       snipOverlay.style.height = `${scrollHeight}px`;
       snipOverlay.style.display = 'block';
-      updateStatus('✂️ 已开启框选模式：请用鼠标在论文公式或插图上按住左键拖拽拉框！');
+      updateStatus('已开启框选模式：请用鼠标在论文公式或插图上按住左键拖拽拉框');
     } else {
       btnSnip.style.background = 'rgba(245, 158, 11, 0.15)';
       btnSnip.style.color = '#fde68a';
@@ -2373,7 +2648,7 @@ function setupPdfSnipper() {
     selectNode(newId);
 
     toggleSnip(false);
-    updateStatus(`✂️ 已截取第 ${targetPageNum} 页原版公式/插图入图！正在由 Gemini 多模态自动提取 LaTeX 表达式...`);
+    updateStatus(`已截取第 ${targetPageNum} 页原版公式/插图入图，正在逆向提取 LaTeX 表达式...`);
 
     // 自动调用大模型多模态公式反编译与变量解析
     transcribeFormula(newNode, dataUrl, citation);
@@ -2399,7 +2674,7 @@ async function transcribeFormula(nodeOrId, imageUrl, citation) {
     renderNodes();
     if (selectedNodeId === nodeId) updateContextInspector();
   }
-  updateStatus(`⏳ 正在请求 Gemini 多模态视觉模型逆向提取公式与参数...`);
+  updateStatus(`正在请求视觉模型逆向提取公式与参数...`);
 
   try {
     const res = await fetch('/api/ocr-formula', {
@@ -2417,13 +2692,13 @@ async function transcribeFormula(nodeOrId, imageUrl, citation) {
         saveGraph();
         renderNodes();
         if (selectedNodeId === nodeId) updateContextInspector();
-        updateStatus(`✨ 已成功将【${citation}】反编译为标准 LaTeX 公式与物理释义！`);
+        updateStatus(`已成功将《${citation}》反编译为标准 LaTeX 公式与物理释义`);
       } else {
         targetNode.ocrStatus = 'failed';
         saveGraph();
         renderNodes();
         if (selectedNodeId === nodeId) updateContextInspector();
-        updateStatus(`⚠️ 公式反编译未完成: ${data.error || '未能识别有效内容'}`);
+        updateStatus(`公式反编译未完成: ${data.error || '未能识别有效内容'}`);
       }
     }
   } catch (err) {
@@ -2435,7 +2710,7 @@ async function transcribeFormula(nodeOrId, imageUrl, citation) {
       renderNodes();
       if (selectedNodeId === nodeId) updateContextInspector();
     }
-    updateStatus(`⚠️ 网络连接或调用异常: ${err.message}`);
+    updateStatus(`网络连接或调用异常: ${err.message}`);
   }
 }
 
@@ -2494,8 +2769,8 @@ function renderSessionsList() {
       <div class="session-item-header">
         <span class="session-item-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</span>
         <div class="session-actions">
-          <button class="session-action-btn btn-rename" title="重命名课题">✏️</button>
-          <button class="session-action-btn btn-del" title="删除课题">🗑️</button>
+          <button class="session-action-btn btn-rename" title="重命名课题">改</button>
+          <button class="session-action-btn btn-del" title="删除课题">删</button>
         </div>
       </div>
       <div class="session-item-meta">
@@ -2825,7 +3100,7 @@ function setupEventListeners() {
               state.pulledEdge.target = newTargetId;
               saveGraph();
               renderEdges();
-              showToastNotification(`🔄 连线已成功改接到新下游节点！`, () => undoGraph());
+              showToastNotification(`连线已成功改接到新下游节点`, () => undoGraph());
               return;
             }
           }
@@ -2839,7 +3114,7 @@ function setupEventListeners() {
               const sNode = graph.nodes.find(n => n.id === targetEdge.source);
               const sTitle = sNode ? (sNode.title || sNode.id) : targetEdge.source;
               deleteEdge(targetEdge.id);
-              showToastNotification(`✂️ 已精准切除与【${escapeHtml(sTitle)}】的连线`, () => undoGraph());
+              showToastNotification(`已切除与【${escapeHtml(sTitle)}】的连线`, () => undoGraph());
               return;
             }
           }
@@ -2850,7 +3125,7 @@ function setupEventListeners() {
             const sNode = graph.nodes.find(n => n.id === state.pulledEdge.source);
             const sTitle = sNode ? (sNode.title || sNode.id) : state.pulledEdge.source;
             deleteEdge(state.pulledEdge.id);
-            showToastNotification(`✂️ 已从下游成功拔除并切断连线【${escapeHtml(sTitle)}】`, () => undoGraph());
+            showToastNotification(`已从下游拔除并切断连线【${escapeHtml(sTitle)}】`, () => undoGraph());
             return;
           } else if (state.incoming.length > 1) {
             // 多条入边：根据鼠标拖拽矢量方向切除最匹配的那根
@@ -2872,7 +3147,7 @@ function setupEventListeners() {
               const sNode = graph.nodes.find(n => n.id === closestEdge.source);
               const sTitle = sNode ? (sNode.title || sNode.id) : closestEdge.source;
               deleteEdge(closestEdge.id);
-              showToastNotification(`✂️ 已根据拖拽方向拔除连线【${escapeHtml(sTitle)}】`, () => undoGraph());
+              showToastNotification(`已根据拖拽方向拔除连线【${escapeHtml(sTitle)}】`, () => undoGraph());
               return;
             }
           }
@@ -3180,7 +3455,7 @@ function setupEventListeners() {
         { id: 'deepseek-reasoner', name: 'deepseek-reasoner (DeepSeek-R1 深度长思维链)' }
       ],
       vision_models: [
-        { id: '', name: '✨ 自动回退 (DeepSeek 官方无多模态，由主引擎/本地代理处理)' }
+        { id: '', name: '自动回退 (DeepSeek 官方无多模态，由主引擎/本地代理处理)' }
       ]
     },
     openai: {
@@ -3239,7 +3514,7 @@ function setupEventListeners() {
       let html = '';
       
       // 1. 服务商专属官方推荐模型
-      html += `<optgroup label="🌟 ${preset.name} 专属推荐模型">`;
+      html += `<optgroup label="${preset.name} 推荐模型">`;
       (preset.models || []).forEach(m => {
         html += `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`;
       });
@@ -3247,7 +3522,7 @@ function setupEventListeners() {
 
       // 2. 在线探测发现的实时模型 (若有)
       if (fetchedOnlineModels && fetchedOnlineModels.length > 0) {
-        html += `<optgroup label="⚡ 在线探测发现可用模型 (${fetchedOnlineModels.length} 个)">`;
+        html += `<optgroup label="在线探测发现模型 (${fetchedOnlineModels.length} 个)">`;
         fetchedOnlineModels.forEach(mid => {
           html += `<option value="${escapeHtml(mid)}">${escapeHtml(mid)}</option>`;
         });
@@ -3255,7 +3530,7 @@ function setupEventListeners() {
       }
 
       // 3. 自定义输入兜底
-      html += `<optgroup label="✏️ 自定义输入">
+      html += `<optgroup label="自定义输入">
         <option value="__custom__">自定义模型名称...</option>
       </optgroup>`;
 
@@ -3281,9 +3556,9 @@ function setupEventListeners() {
     }
 
     if (visionSelect) {
-      let vHtml = `<option value="">✨ 智能自动路由 (根据主模型与服务商自适应)</option>`;
+      let vHtml = `<option value="">自动路由 (根据主模型与服务商自适应)</option>`;
       if (preset.vision_models && preset.vision_models.length > 0) {
-        vHtml += `<optgroup label="👁️ ${preset.name} 推荐多模态视觉">`;
+        vHtml += `<optgroup label="${preset.name} 推荐多模态视觉">`;
         preset.vision_models.forEach(vm => {
           if (vm.id) {
             vHtml += `<option value="${escapeHtml(vm.id)}">${escapeHtml(vm.name)}</option>`;
@@ -3337,7 +3612,7 @@ function setupEventListeners() {
         const savedKeys = getSavedProviderKeys();
         const currentInputKey = (document.getElementById('cfg-api-key')?.value || '').trim();
         const hasKey = !!(savedKeys[pKey] || currentInputKey || (currentConfig.api_key && currentConfig.api_base?.includes(pKey)));
-        keyStatus.innerText = hasKey ? '已记忆本地私钥 ✓' : '请粘贴 Key';
+        keyStatus.innerText = hasKey ? '已记忆本地私钥' : '请粘贴 Key';
         keyStatus.style.color = hasKey ? '#10b981' : '#f59e0b';
       }
     }
@@ -3399,13 +3674,13 @@ function setupEventListeners() {
     const val = parseFloat(v);
     if (!hintEl) return;
     if (val <= 0.15) {
-      hintEl.innerText = '🔒 严格确定性证明 (代码/数学贪心采样)';
+      hintEl.innerText = '严格确定性证明 (代码/数学贪心采样)';
       hintEl.style.color = '#38bdf8';
     } else if (val <= 0.45) {
-      hintEl.innerText = '⚖️ 均衡学术论证 (默认推荐)';
+      hintEl.innerText = '均衡学术论证 (默认推荐)';
       hintEl.style.color = '#34d399';
     } else {
-      hintEl.innerText = '💡 启发式发散探索 (高创造性)';
+      hintEl.innerText = '启发式发散探索 (高创造性)';
       hintEl.style.color = '#f59e0b';
     }
   };
@@ -3431,7 +3706,7 @@ function setupEventListeners() {
         return;
       }
       btnFetchModels.disabled = true;
-      btnFetchModels.innerText = '⏳ 探测中...';
+      btnFetchModels.innerText = '探测中...';
       try {
         const res = await fetch('/api/fetch-models', {
           method: 'POST',
@@ -3443,7 +3718,7 @@ function setupEventListeners() {
           const curModel = modelSelectEl ? modelSelectEl.value : currentConfig.model;
           const curVision = document.getElementById('cfg-vision-model-select')?.value || currentConfig.vision_model;
           populateModelOptions(currentActiveProvider, curModel, curVision, data.models);
-          updateStatus(`✅ 探测成功！已拉取 ${data.models.length} 个在线模型`);
+          updateStatus(`探测成功，已拉取 ${data.models.length} 个在线模型`);
         } else {
           alert(`未能自动获取模型列表: ${data.error || '远端未开放 /v1/models 标准接口'}`);
         }
@@ -3451,7 +3726,7 @@ function setupEventListeners() {
         alert(`探测请求异常: ${err.message}`);
       } finally {
         btnFetchModels.disabled = false;
-        btnFetchModels.innerText = '🔄 探测在线模型';
+        btnFetchModels.innerText = '探测在线模型';
       }
     };
   }
@@ -3463,7 +3738,7 @@ function setupEventListeners() {
     btnToggleKey.onclick = () => {
       const isPassword = apiKeyInput.type === 'password';
       apiKeyInput.type = isPassword ? 'text' : 'password';
-      btnToggleKey.innerText = isPassword ? '🙈' : '👁️';
+      btnToggleKey.innerText = isPassword ? '显' : '隐';
     };
   }
 
@@ -3486,12 +3761,12 @@ function setupEventListeners() {
       }
 
       btnTestConn.disabled = true;
-      btnTestConn.innerHTML = '<span>⏳ 探测中...</span>';
+      btnTestConn.innerHTML = '<span>探测中...</span>';
       testStatusEl.style.display = 'block';
       testStatusEl.style.background = 'rgba(99, 102, 241, 0.12)';
       testStatusEl.style.border = '1px solid rgba(99, 102, 241, 0.3)';
       testStatusEl.style.color = '#c7d2fe';
-      testStatusEl.innerText = `⏳ 正在向 ${api_base} 发送探测请求 (模型: ${model}, 采样温度: ${temperature})...`;
+      testStatusEl.innerText = `正在向 ${api_base} 发送探测请求 (模型: ${model}, 采样温度: ${temperature})...`;
 
       try {
         const res = await fetch('/api/test-connection', {
@@ -3504,7 +3779,7 @@ function setupEventListeners() {
           testStatusEl.style.background = 'rgba(16, 185, 129, 0.12)';
           testStatusEl.style.border = '1px solid rgba(16, 185, 129, 0.4)';
           testStatusEl.style.color = '#34d399';
-          testStatusEl.innerText = `✅ ${data.message} (实测采样温度: ${temperature})`;
+          testStatusEl.innerText = `${data.message} (实测采样温度: ${temperature})`;
           if (api_key && currentActiveProvider) {
             saveProviderKey(currentActiveProvider, api_key);
             updateProviderHintBar(currentActiveProvider);
@@ -3513,16 +3788,16 @@ function setupEventListeners() {
           testStatusEl.style.background = 'rgba(239, 68, 68, 0.12)';
           testStatusEl.style.border = '1px solid rgba(239, 68, 68, 0.4)';
           testStatusEl.style.color = '#f87171';
-          testStatusEl.innerText = `❌ ${data.error}`;
+          testStatusEl.innerText = data.error;
         }
       } catch (err) {
         testStatusEl.style.background = 'rgba(239, 68, 68, 0.12)';
         testStatusEl.style.border = '1px solid rgba(239, 68, 68, 0.4)';
         testStatusEl.style.color = '#f87171';
-        testStatusEl.innerText = `❌ 请求异常: ${err.message}`;
+        testStatusEl.innerText = `请求异常: ${err.message}`;
       } finally {
         btnTestConn.disabled = false;
-        btnTestConn.innerHTML = '<span>⚡ 测试连接</span>';
+        btnTestConn.innerHTML = '<span>测试连接</span>';
       }
     };
   }
@@ -3665,13 +3940,37 @@ function setupEventListeners() {
     zoomLayoutBtn.onclick = () => applySugiyamaLayout(true);
   }
 
-  // 概念追问弹窗控制
+  // 概念追问与邻域研读弹窗控制
   const btnCloseInquiry = document.getElementById('btn-close-inquiry');
-  if (btnCloseInquiry) btnCloseInquiry.onclick = () => { inquiryModal.style.display = 'none'; };
+  if (btnCloseInquiry) btnCloseInquiry.onclick = () => {
+    inquiryModal.style.display = 'none';
+    neighborhoodActiveContext = null;
+    const banner = document.getElementById('inquiry-neighborhood-banner');
+    if (banner) banner.style.display = 'none';
+  };
   const btnCancelInquiry = document.getElementById('btn-cancel-inquiry');
-  if (btnCancelInquiry) btnCancelInquiry.onclick = () => { inquiryModal.style.display = 'none'; };
+  if (btnCancelInquiry) btnCancelInquiry.onclick = () => {
+    inquiryModal.style.display = 'none';
+    neighborhoodActiveContext = null;
+    const banner = document.getElementById('inquiry-neighborhood-banner');
+    if (banner) banner.style.display = 'none';
+  };
   const btnSubmitInquiry = document.getElementById('btn-submit-inquiry');
   if (btnSubmitInquiry) btnSubmitInquiry.onclick = () => { submitConceptInquiry(); };
+
+  // 顶栏与大纲中的邻域研读与AI骨架触发器
+  const btnNeighborhoodProbe = document.getElementById('btn-neighborhood-probe');
+  if (btnNeighborhoodProbe) {
+    btnNeighborhoodProbe.onclick = () => {
+      openNeighborhoodInquiry(currentPdfPageNum, null);
+    };
+  }
+  const btnAiOutline = document.getElementById('btn-ai-outline');
+  if (btnAiOutline) {
+    btnAiOutline.onclick = () => {
+      requestAiOutline(true);
+    };
+  }
 
   // 全屏卡片阅读弹窗控制
   const cardModal = document.getElementById('card-modal');
@@ -3757,7 +4056,7 @@ function showPortInPopover(targetId, clientX, clientY) {
   if (incoming.length === 0) {
     popover.innerHTML = `
       <div class="port-in-popover-title">
-        <span>🔌 流入上下文</span>
+        <span>流入上下文</span>
         <button class="popover-close-btn" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;">✕</button>
       </div>
       <div style="font-size: 11.5px; color: #94a3b8; padding: 4px 6px;">该节点暂无流入依赖。<br>可从上游节点右侧端口拖线接入。</div>
@@ -3772,7 +4071,7 @@ function showPortInPopover(targetId, clientX, clientY) {
           <span style="font-size: 11.5px; color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;" title="${escapeHtml(srcTitle)}">
             ${escapeHtml(srcTitle)}
           </span>
-          <button class="btn-cut" data-edge-id="${ed.id}">✂️ 剪断</button>
+          <button class="btn-cut" data-edge-id="${ed.id}">剪断</button>
         </div>
       `;
     });
@@ -3785,7 +4084,7 @@ function showPortInPopover(targetId, clientX, clientY) {
 
     popover.innerHTML = `
       <div class="port-in-popover-title">
-        <span>🔌 流入依赖 (${incoming.length} 条)</span>
+        <span>流入依赖 (${incoming.length} 条)</span>
         <button class="popover-close-btn" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;">✕</button>
       </div>
       <div class="port-in-popover-list">
@@ -3825,7 +4124,7 @@ function showPortInPopover(targetId, clientX, clientY) {
         pushGraphHistory();
         deleteEdge(edgeId);
         closePortPopover();
-        showToastNotification(`✂️ 已剪断与【${escapeHtml(sTitle)}】的依赖连线`, () => undoGraph());
+        showToastNotification(`已剪断与【${escapeHtml(sTitle)}】的依赖连线`, () => undoGraph());
       }
     });
   });
@@ -3838,7 +4137,7 @@ function showPortInPopover(targetId, clientX, clientY) {
       const edgesToDelete = incoming.map(ed => ed.id);
       edgesToDelete.forEach(id => deleteEdge(id));
       closePortPopover();
-      showToastNotification(`✂️ 已剪断该节点的全部 ${edgesToDelete.length} 条流入依赖`, () => undoGraph());
+      showToastNotification(`已剪断该节点的全部 ${edgesToDelete.length} 条流入依赖`, () => undoGraph());
     });
   }
 }
@@ -3866,7 +4165,7 @@ function openCodeModal() {
       if (n.kind === 'question' || n.kind === 'conclusion') {
         const opt = document.createElement('option');
         opt.value = n.id;
-        opt.innerText = `${n.kind === 'question' ? '❓' : '💡'} ${n.title || n.question || n.id}`;
+        opt.innerText = n.title || n.question || n.id;
         if (n.id === selectedNodeId) opt.selected = true;
         targetSelect.appendChild(opt);
       }
@@ -3979,7 +4278,7 @@ function initSelectionToolbar() {
       toolbar.style.left = `${posX}px`;
       toolbar.style.top = `${posY}px`;
 
-      btnCopy.innerHTML = `<span class="sel-icon">📋</span> 复制`;
+      btnCopy.innerText = '复制';
       btnCopy.classList.remove('copied');
     } catch (e) {
       toolbar.style.display = 'none';
@@ -4027,7 +4326,7 @@ function initSelectionToolbar() {
       }
     }
 
-    btnCopy.innerHTML = `<span class="sel-icon">✓</span> 已复制!`;
+    btnCopy.innerText = '已复制';
     btnCopy.classList.add('copied');
     updateStatus(`已划线复制 ${currentSelectionText.length} 字到剪贴板`);
     setTimeout(() => {
@@ -4144,22 +4443,22 @@ function openCardFullscreen(node) {
       <blockquote style="font-size: 15px; line-height: 1.8; color: #a7f3d0; border-left: 4px solid #34d399; padding-left: 14px; background: rgba(16, 185, 129, 0.08); border-radius: 0 8px 8px 0;">
         ${renderMarkdown(node.excerpt || node.content || '')}
       </blockquote>
-      ${node.citation ? `<div class="citation-chip" style="margin-top: 16px; font-size: 12.5px; padding: 4px 12px;">📖 证据出处: ${escapeHtml(node.citation)}</div>` : ''}
+      ${node.citation ? `<div class="citation-chip" style="margin-top: 16px; font-size: 12.5px; padding: 4px 12px;">证据出处: ${escapeHtml(node.citation)}</div>` : ''}
     `;
   } else if (node.kind === 'source_code') {
     bodyEl.innerHTML = `
       <div class="code-block-wrapper" style="margin-top: 0;">
         <div class="code-block-header">
           <span class="code-lang-tag">${escapeHtml((node.language || 'c').toUpperCase())}</span>
-          <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">📋 复制代码片段</button>
+          <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">复制代码片段</button>
         </div>
         <pre class="code-pre" style="max-height: 480px; font-size: 13px;">${highlightCode(node.code || node.content || '', node.language || 'c')}</pre>
       </div>
-      ${node.citation ? `<div class="citation-chip" style="margin-top: 16px; font-size: 12.5px; padding: 4px 12px;">📖 源码工程出处: ${escapeHtml(node.citation)}</div>` : ''}
+      ${node.citation ? `<div class="citation-chip" style="margin-top: 16px; font-size: 12.5px; padding: 4px 12px;">源码出处: ${escapeHtml(node.citation)}</div>` : ''}
     `;
   } else if (node.kind === 'hardware_probe') {
     bodyEl.innerHTML = `
-      ${node.location ? `<div class="probe-loc-badge" style="font-size: 13px; padding: 4px 10px; margin-bottom: 14px;">📍 断点源码位置: ${escapeHtml(node.location)}</div>` : ''}
+      ${node.location ? `<div class="probe-loc-badge" style="font-size: 13px; padding: 4px 10px; margin-bottom: 14px;">断点源码位置: ${escapeHtml(node.location)}</div>` : ''}
       <div style="margin-bottom: 14px;">
         <div class="probe-grid-label" style="font-size: 12px; margin-bottom: 6px;">16 个通用寄存器物理状态 (x86-64)</div>
         <div class="reg-grid" style="grid-template-columns: repeat(4, 1fr); padding: 10px; gap: 8px;">
@@ -4178,7 +4477,7 @@ function openCardFullscreen(node) {
           <pre class="code-pre" style="max-height: 180px; font-size: 11.5px; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 8px;">${escapeHtml(String(node.stack).replace(/\\r\\n|\\n|\\r/g, '\n'))}</pre>
         </div>
       ` : ''}
-      ${node.notes ? `<div style="font-size: 12.5px; color: #94a3b8; font-style: italic; margin-top: 10px;">💬 调试断点备注: ${escapeHtml(node.notes)}</div>` : ''}
+      ${node.notes ? `<div style="font-size: 12.5px; color: #94a3b8; font-style: italic; margin-top: 10px;">调试断点备注: ${escapeHtml(node.notes)}</div>` : ''}
     `;
   } else {
     bodyEl.innerHTML = `
@@ -4273,7 +4572,7 @@ function applySugiyamaLayout(autoFit = true) {
       renderEdges();
       saveGraph();
       if (autoFit) fitView();
-      updateStatus("✨ 拓扑已自动规整为因果分层网络！");
+      updateStatus("拓扑已自动规整为因果分层网络");
     }
   }
   requestAnimationFrame(animateEdges);
@@ -4423,7 +4722,7 @@ window.copyRawCodeBlock = function(btn, event) {
   const text = stash ? stash.value : wrapper.querySelector('.code-pre').innerText;
   navigator.clipboard.writeText(text).then(() => {
     const old = btn.innerText;
-    btn.innerText = '✓ 已复制';
+    btn.innerText = '已复制';
     btn.style.color = '#34d399';
     setTimeout(() => {
       btn.innerText = old;
@@ -4655,7 +4954,7 @@ function renderMarkdown(text) {
       <div class="code-block-wrapper" id="${snippetId}">
         <div class="code-block-header">
           <span class="code-lang-tag">${escapeHtml((lang || 'code').toUpperCase())}</span>
-          <button class="code-copy-btn" onclick="copyRawCodeBlock(this, event)">📋 复制</button>
+          <button class="code-copy-btn" onclick="copyRawCodeBlock(this, event)">复制</button>
         </div>
         <pre class="code-pre"><code>${highlighted}</code></pre>
         <textarea class="raw-code-stash" style="display: none;">${escapeHtml(code)}</textarea>
