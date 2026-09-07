@@ -245,6 +245,9 @@ function createNodeElement(node) {
   div.style.left = `${node.x}px`;
   div.style.top = `${node.y}px`;
   div.dataset.id = node.id;
+  if (node.width) {
+    div.style.width = `${node.width}px`;
+  }
 
   const kindNames = {
     question: '探索课题',
@@ -271,6 +274,7 @@ function createNodeElement(node) {
       </div>
       <div style="display: flex; align-items: center; gap: 4px;">
         ${statusBadge}
+        <button class="node-btn-icon node-btn-width" title="一键宽屏展开 / 恢复紧凑 (↔)">↔</button>
         <button class="node-btn-icon node-btn-expand" title="全屏学术阅读 (双击卡片也可进入)">⛶</button>
         <button class="node-btn-icon node-btn-del" title="删除节点">✕</button>
       </div>
@@ -286,9 +290,12 @@ function createNodeElement(node) {
         ? `<div class="code-block-wrapper" style="margin-top: 0; margin-bottom: 6px;">
              <div class="code-block-header">
                <span class="code-lang-tag">${escapeHtml((node.language || 'c').toUpperCase())}</span>
-               <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">📋 复制</button>
+               <div style="display: flex; align-items: center; gap: 6px;">
+                 <button class="code-wrap-btn ${node.isWrap ? 'active' : ''}" onclick="toggleCodeWrap(this, '${node.id}', event)" title="切换自动折行">↩ 折行</button>
+                 <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">📋 复制</button>
+               </div>
              </div>
-             <pre class="code-pre" style="max-height: 180px;">${highlightCode(node.code || node.content || '', node.language || 'c')}</pre>
+             <pre class="code-pre ${node.isWrap ? 'wrap-lines' : ''}" style="max-height: 180px;">${highlightCode(node.code || node.content || '', node.language || 'c')}</pre>
            </div>
            ${node.citation ? `<div class="citation-chip">📖 ${escapeHtml(node.citation)}</div>` : ''}`
         : node.kind === 'hardware_probe'
@@ -298,8 +305,11 @@ function createNodeElement(node) {
              ${renderRegistersHtml(node.registers)}
            </div>
            ${node.disassembly ? `
-             <div class="probe-grid-label"><span>反汇编指令流 ($pc)</span></div>
-             <div class="disasm-box">${formatDisassemblyHtml(node.disassembly)}</div>
+             <div class="probe-grid-label">
+               <span>反汇编指令流 ($pc)</span>
+               <button class="code-wrap-btn ${node.isDisasmWrap ? 'active' : ''}" onclick="toggleDisasmWrap(this, '${node.id}', event)" title="切换自动折行">↩ 折行</button>
+             </div>
+             <div class="disasm-box ${node.isDisasmWrap ? 'wrap-lines' : ''}">${formatDisassemblyHtml(node.disassembly)}</div>
            ` : ''}
            ${node.notes ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 6px; font-style: italic;">💬 ${escapeHtml(node.notes)}</div>` : ''}`
         : `<div class="card-question-text" style="font-weight: 600; color: var(--text-primary); line-height: 1.45; cursor: text;" title="点击可直接在右侧面板编辑问题">${renderMarkdown(node.question || '<em>(点击在此输入具体科研问题...)</em>')}</div>
@@ -309,12 +319,13 @@ function createNodeElement(node) {
     <div class="node-footer">
       <span>${node.kind === 'material' ? '客观事实锚点' : (node.kind === 'source_code' ? '源码公理锚点' : (node.kind === 'hardware_probe' ? '硬件物理快照' : '模型思考单元'))}</span>
       <div style="font-size: 10.5px; color: #64748b;">双击全屏</div>
+      <div class="node-resize-handle" title="拖拽调整卡片宽度"></div>
     </div>
   `;
 
   // 单击选中（若点击的是问题文本，自动聚焦右侧输入框）
   div.addEventListener('click', (e) => {
-    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select')) return;
+    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select, .node-resize-handle')) return;
     selectNode(node.id);
     if (e.target.closest('.card-question-text')) {
       setTimeout(() => {
@@ -326,9 +337,18 @@ function createNodeElement(node) {
 
   // 双击全屏阅读
   div.addEventListener('dblclick', (e) => {
-    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select')) return;
+    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select, .node-resize-handle')) return;
     openCardFullscreen(node);
   });
+
+  // 宽屏/紧凑切换按钮
+  const widthBtn = div.querySelector('.node-btn-width');
+  if (widthBtn) {
+    widthBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.toggleNodeWidth(node.id, e);
+    });
+  }
 
   // 放大按钮
   const expandBtn = div.querySelector('.node-btn-expand');
@@ -348,9 +368,40 @@ function createNodeElement(node) {
     });
   }
 
+  // 自由调整卡片宽度拖拽手柄
+  const resizeHandle = div.querySelector('.node-resize-handle');
+  if (resizeHandle) {
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const startX = e.clientX;
+      const initialWidth = div.offsetWidth;
+      div.style.transition = 'none';
+
+      const onMouseMove = (moveEv) => {
+        const deltaX = (moveEv.clientX - startX) / (zoom || 1);
+        const newWidth = Math.max(300, Math.min(960, Math.round(initialWidth + deltaX)));
+        div.style.width = newWidth + 'px';
+        node.width = newWidth;
+        updateConnectedEdges(node.id);
+      };
+
+      const onMouseUp = () => {
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        div.style.transition = '';
+        updateConnectedEdges(node.id);
+        saveGraph();
+      };
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    });
+  }
+
   // 节点拖拽
   div.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select')) return;
+    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select, .node-resize-handle')) return;
     draggingNodeId = node.id;
     dragStartPos = { x: e.clientX, y: e.clientY };
     isActuallyDragging = false;
@@ -2595,6 +2646,16 @@ function setupEventListeners() {
 
   // 滚轮分流：光标在卡片内容区时放行原生滚动；仅在画布空白区缩放 (GPU 硬件加速，零重绘)
   container.addEventListener('wheel', (e) => {
+    // 0. Shift + 滚轮 或在横向代码/反汇编容器上方：平滑驱动横向滚动 (优雅免拖滚动条)
+    if (e.shiftKey) {
+      const scrollableHoriz = e.target.closest('.code-pre, .disasm-box, .node-content');
+      if (scrollableHoriz) {
+        scrollableHoriz.scrollLeft += (e.deltaY || e.deltaX);
+        e.preventDefault();
+        return;
+      }
+    }
+
     // 1. 若光标处于卡片内容区上方，且未按住 Ctrl/Cmd 键强制缩放画布：
     // 直接放行给 Chromium 底层 Compositor 线程原生 120Hz 丝滑惯性滚动
     if (e.target.closest('.node-content') && !e.ctrlKey && !e.metaKey) {
@@ -3643,10 +3704,12 @@ function applySugiyamaLayout(autoFit = true) {
   updateStatus("正在执行 Sugiyama 拓扑自动分层排布...");
 
   const domHeightsMap = {};
+  const domWidthsMap = {};
   graph.nodes.forEach(n => {
     const el = document.querySelector(`.node[data-id="${n.id}"]`);
     if (el) {
       domHeightsMap[n.id] = el.offsetHeight;
+      domWidthsMap[n.id] = el.offsetWidth;
     }
   });
 
@@ -3656,7 +3719,8 @@ function applySugiyamaLayout(autoFit = true) {
     vGap: 38,
     startX: 60,
     startY: 60,
-    domHeightsMap
+    domHeightsMap,
+    domWidthsMap
   });
 
   const positions = layoutResult.positions;
@@ -3855,6 +3919,71 @@ window.copySnippetText = function(nodeId, event) {
   }).catch(() => {
     alert("复制失败，请手动选择复制。");
   });
+};
+
+window.toggleCodeWrap = function(btn, nodeId, event) {
+  if (event) event.stopPropagation();
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  node.isWrap = !node.isWrap;
+  const card = document.querySelector(`.node[data-id="${nodeId}"]`);
+  if (card) {
+    const pre = card.querySelector('.code-pre');
+    if (pre) {
+      pre.classList.toggle('wrap-lines', !!node.isWrap);
+    }
+  }
+  if (btn) {
+    btn.classList.toggle('active', !!node.isWrap);
+  }
+  updateConnectedEdges(nodeId);
+  saveGraph();
+  updateStatus(node.isWrap ? "已开启源码自适应折行" : "已恢复源码单行代码流");
+};
+
+window.toggleDisasmWrap = function(btn, nodeId, event) {
+  if (event) event.stopPropagation();
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  node.isDisasmWrap = !node.isDisasmWrap;
+  const card = document.querySelector(`.node[data-id="${nodeId}"]`);
+  if (card) {
+    const disasmBox = card.querySelector('.disasm-box');
+    if (disasmBox) {
+      disasmBox.classList.toggle('wrap-lines', !!node.isDisasmWrap);
+    }
+  }
+  if (btn) {
+    btn.classList.toggle('active', !!node.isDisasmWrap);
+  }
+  updateConnectedEdges(nodeId);
+  saveGraph();
+  updateStatus(node.isDisasmWrap ? "已开启反汇编自适应折行" : "已恢复反汇编单行指令流");
+};
+
+window.toggleNodeWidth = function(nodeId, event) {
+  if (event) event.stopPropagation();
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  const card = document.querySelector(`.node[data-id="${nodeId}"]`);
+  if (!card) return;
+
+  const defaultWidth = (node.kind === 'source_code' || node.kind === 'hardware_probe') ? 440 : 360;
+  const expandedWidth = 580;
+
+  const currentW = node.width || card.offsetWidth || defaultWidth;
+  let newW = defaultWidth;
+  if (currentW < 520) {
+    newW = expandedWidth;
+  } else {
+    newW = defaultWidth;
+  }
+
+  node.width = newW;
+  card.style.width = newW + 'px';
+  updateConnectedEdges(node.id);
+  saveGraph();
+  updateStatus(newW > defaultWidth ? "已展开宽屏卡片模式 (580px)" : "已恢复紧凑卡片宽度");
 };
 
 function renderRegistersHtml(regs) {
