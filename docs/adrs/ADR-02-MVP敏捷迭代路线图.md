@@ -105,7 +105,7 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     3. **跨文献实证图谱融合 (Cross-Paper Fusion)**：基于 MVP 3.5 的章节大纲经纬度，将来自【论文 A 弱散射章节】与【论文 B 玻恩近似章节】的实证卡片同时连入同一个课题节点，由大模型进行交叉比对（Cross-Examination），自动挖掘理论冲突与学术空白；
     4. **Obsidian 静态知识库与动态 DAG 画布双向水合 (Bidirectional Obsidian Hydration Pipeline)**：
        * **静态笔记 $\to$ 动态 DAG 拓扑反演**：输入任一 Obsidian 概念（如 `[[虚拟内存]]`），后端自动扫描解析其入链与出链依赖，在画布上一键展开为包含前置公理与衍生结论的局部因果子图；
-       * **声明式 Tracer 数据块无损活化**：笔记中内嵌的 ````tracer:<type>```` 声明式参数块（如套接字生命周期、做市商去抽水等），在水合时由画布自动识别并激活为原地可交互的微部件；
+       * **声明式 Tracer 语法契约预留与无损水合**：确立规范的 ````tracer:<type>```` 声明式参数块契约；在水合时由画布自动识别并呈现为参数结构化静态卡片，预留动态挂载槽位，待阶段 8 微插件体系就绪后无缝热激活为原地动态微部件；
        * **动态推演 $\to$ 结构化笔记结晶**：画布探究完成后，支持将当前有效祖先推演链路一键结晶导出为符合 Obsidian 规范、携带标准 Wikilinks 与学术锚点的复盘 Markdown 笔记；**严格过滤所有动态渲染出的 DOM/脚本，仅持久化纯净声明式数据块**，实现知识资产沉淀闭环。
     5. **外部 AI 对话记录水合与问答因果拓扑化 (Web AI Chat Markdown Ingestion & Multi-Turn Decomposition)**：
        * **跨平台科研探索接力与标准防腐层 (Anti-Corruption Layer)**：
@@ -129,7 +129,7 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
 *   **主场模块**：`server.py` (`/api/execute-tracer`, `/api/z3-solve`), `computational_backend/`, `public/app.js`, `public/tracers/`
 *   **核心升级**：
     1. **符号数学求导 (SymPy Engine)**：针对节点中反编译提取出的 LaTeX 表达式，支持一键在后端调用 SymPy 进行解析求导与泰勒级数展开；
-    2. **物理光场数值离散 (SciPy/NumPy)**：针对基尔霍夫衍射公式等复杂积分，支持一键运行轻量数值仿真，直接在卡片中输出物方与像方光斑对比热力图；
+    2. **科学计算与张量数值仿真内核 (Scientific Numeric & Tensor Sandbox)**：后端集成 SciPy/NumPy 求解管道，支持对微观物理场、连续积分方程（如衍射光斑）与张量动力学一键运行轻量数值仿真，直接在卡片中输出高保真二维/三维热力图与相图；
     3. **微观系统状态转移追踪器 (Micro-Architecture & Quantitative State Tracers / Explorable Sandbox)**：
        * **神经生物学低阻抗感知架构 (Neuro-Ergonomic Sensory Pipeline)**：
          * 贯彻 Bret Victor 的“可探索解释 (Explorable Explanations)”范式，建立 `public/tracers/` 原生 ESM 微插件库（标准 `export function mountTracer(container, params)` 规范）；
@@ -154,7 +154,7 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
           * 支持微部件沿有向边向后传递衍生状态（例如：上游做市商微部件计算出的无抽水公平胜率，沿因果连线实时注入下游凯利下注卡片，触发下游仓位曲线毫秒级重绘）；
           * **增量编译级脏状态与失效传播机制 (Reactive Invalidation & Knowledge CI/CD)**：借鉴 Rustc Salsa / Bazel 细粒度增量编译思想，当上游微部件参数、数学假设或底层源码发生 Diff 时，下游依赖路径所有受影响卡片**自动浮现黄色虚线警示指示器（State: Stale/Dirty）**，直至下游卡片重新执行内部验证断言通过后自动转绿，达成学术推演资产的持续集成与防腐；
      4. **SMT / Z3 形式化求解与一阶逻辑证明网 (Formal Invariant, Z3 Prover & Strongly-Typed Logic Gates)**：
-        * 后端集成 Z3 求解器，专门针对底层位级算法（如 Data Lab 的 `bitAnd`, `howManyBits`）与状态机互斥不变量；支持在 100 毫秒内对用户实现与标准形式化规格进行全空间（$2^{32}$）数学等价性证明；
+        * 后端集成 Z3 求解器，专门针对底层位级算法（如 Data Lab 的 `bitAnd`, `howManyBits`）与状态机互斥不变量；支持在 100 毫秒内对标准位级规格进行全空间（$2^{32}$）数学等价性证明，内置 1.0 秒硬性求解超时熔断门禁（Solver Timeout Guard），防止非线性不可判定算子导致后端阻塞；
         * **边的逻辑算子强类型化 (Strongly-Typed Edges & Logic Gates: AND / OR / REFUTE)**：
           * 将单一无语义黑线升维为一阶谓词逻辑门控：AND 汇聚桩（充要前置合取）、OR 分流桩（等价双轨析取分支）；
           * **Z3 反例与证伪反驳弧联动**：当 Z3 求解出全空间唯一的“最小破坏性反例输入（Minimal Failing Counterexample）”时，直接在画布上投影为指向目标卡片的红色锯齿状 **REFUTE 证伪反驳弧**，使因果图跃迁为可视化一阶逻辑证明网（Proof Net）。
@@ -162,13 +162,15 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     1. 学术卡片不仅能“讲道理”，还能“算结果”，打通大模型推理与确定性数值仿真的闭环；
     2. 在画布上运行微架构追踪时，流水线支持 60FPS 平滑时钟刮擦，Cache 呈现 64 字节前注意撞色网格；
     3. 点击微部件中的任意红色气泡或冲突色块，可在 0.1 秒内精准下钻联动高亮对应的 C 源码行、反汇编指令和物理内存地址；
-    4. 针对任意位运算函数，点击“Z3 形式化验证”，能在 0.2 秒内输出严格数学证明；若存在逻辑缺陷，反例输入直接具象化为红色的 REFUTE 证伪反驳弧；
+    4. 针对标准位级算法（Data Lab 难度），点击“Z3 形式化验证”，能在 0.2 秒内输出严格数学证明或证伪反例（内置 1.0 秒超时熔断提示）；若存在逻辑缺陷，反例输入直接具象化为红色的 REFUTE 证伪反驳弧；
     5. 修改上游微部件参数或代码后，下游依赖节点毫秒级捕获失效事件并呈现黄色脏标记，断言跑通后平滑复原。
 
 ### 阶段 9: MVP 5.0 (全自动化科研综述导出、拓扑间隔复习与离线私有沙盒 / Synthesizer, Topological Spaced-Repetition & Privacy Sandbox) —— [终极目标]
-*   **主场模块**：`exporter/latex_generator.py`, `local_engine/`, `public/app.js` (`review_mode`, `ego_graph`)
+*   **主场模块**：`exporter/latex_generator.py`, `server.py` (`/api/ollama-proxy`), `public/app.js` (`review_mode`, `ego_graph`)
 *   **核心升级**：
-    1. **拓扑排序综述一键成稿**：根据因果图拓扑排序，一键生成 Overleaf / IEEE 格式的标准学术论文初稿 LaTeX 压缩包；
+    1. **拓扑排序综述一键成稿与微部件静态降级 (LaTeX Synthesizer & Static Degradation)**：
+       * 根据因果图拓扑排序，一键生成 Overleaf / IEEE 格式的标准学术论文初稿 LaTeX 压缩包；
+       * **微部件静态降级契约 (Static Export Fallback Invariant)**：卡片内嵌的动态微部件在编译为 LaTeX 时，必须自动降级为当前参数配置下的静态矢量图（SVG/高DPI PNG）或结构化学术三线表（Booktabs），严禁在论文中输出未定义语法块或空白；
     2. **基于 DAG 机制有向边的拓扑间隔复习引擎 (Topological Edge-FSRS Spaced Repetition)**：
        * 颠覆传统 Anki 针对孤立事实卡片的浅层死记硬背模型，将复习单元从“单点卡片”升维至“因果有向边（Causal Edges）”；
        * 系统定期对画布因果链发起主动遮蔽探问（例如隐去直接映射 Cache 到消除冲突之间的关键推演边），逼迫大脑提取底层的微观硬件机制与物理转移条件，形成网络状抗遗忘骨架；
@@ -176,12 +178,14 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
        * 破解库拉托夫斯基非平面连线交叉困境（Crossing Number > 0），作为 FSRS 拓扑复习与百级大图防蜘蛛网导航的核心交互底座；
        * 当卡片规模达到 50~100+ 时，激活自我中心模式：单选或悬停目标卡片时，画布自动虚化 90% 无关噪点，**仅高亮其 1-hop / 2-hop 祖先（依赖源头）与后继（影响范围）**，将视觉与前额叶工作记忆强制钳位在 $7 \pm 2$ 的生理极限内；
        * **复合子图折叠 (Hierarchical Compound Nodes)**：支持类似编译器基本块（BasicBlock）的折叠机制，将局部密集推演卡片群折叠为单一宏观节点，对外仅暴露规范因果总线；
-    4. **100% 纯本地开源视觉模型沙盒**：对接 Ollama/vLLM (InternVL2 / Qwen2-VL)，实现零外网调用的局域网物理保密推演。
+    4. **纯本地轻量代理与离线开源模型沙盒 (Zero-Build Local Model Proxy)**：
+       * 严格遵守约束 3（零重型依赖），AxiomFlow 自身不打包任何重型机器学习底层，仅通过 `server.py` 提供轻量 HTTP Provider 适配代理，直连宿主机已独立运行的 Ollama 或局域网 vLLM 实例（如 `http://localhost:11434`）；
+       * 支持无缝挂载开源多模态大模型（如 InternVL2 / Qwen2-VL），实现零外网依赖的物理保密推演。
 *   **验收标准**：
-    1. 离线模式下一键点击“导出学术报告”，3 秒内生成排版完备的单篇学术报告 PDF/LaTeX；
+    1. 离线模式下一键点击“导出学术报告”，3 秒内生成排版完备的单篇学术报告 PDF/LaTeX（微部件自动降级为矢量切片或学术三线表）；
     2. 开启“拓扑复习模式”，系统能精准遮蔽关键因果依赖边，根据答辩反馈动态调整各机制节点的遗忘复现间隔；
     3. 悬停或单选节点时，画布能在 50ms 内平滑淡化全局背景并聚焦高亮 2-hop 局部因果拓扑，彻底消解百级卡片下的连线蜘蛛网干扰；
-    4. 纯本地私有模型零外网依赖，在断网环境下多模态学术研读与公式推演功能完全保真可用。
+    4. 在断网环境下配置本地 Ollama 实例，系统能通过轻量代理完成公式识别与邻域推演，`server.py` 保持单文件零外部重型依赖。
 
 ### 远期探索愿景 (Post-MVP 5.0 / Non-blocking Research Frontiers)
 *   **时空假说分叉树与多世界分支投影 (Temporal DAG & Hypothesis Branching)**：
