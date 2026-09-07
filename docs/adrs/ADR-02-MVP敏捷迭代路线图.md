@@ -92,17 +92,22 @@ AxiomFlow 起初仅为一个极简的原型脚本工程（工作区 `Tree`）。
     1. **[✅ 已达标]** 可在阅读器侧边一键拉出章节大纲树，点击“2.3 差分相衬显微成像实验结果”自动平滑滚动至第 49 页并激发光晕高亮；
     2. **[⏳ 待达标]** 针对该小节发起追问时，模型自动绑定目标页 $\pm 2$ 页的邻域上下文，1~2 秒内精准解答公式细节与参数定义。
 
-### 阶段 7: MVP 4.0 (双引擎调度、国产/国际模型自由调度、密钥安全记忆与高帧率渲染架构) —— [✅ 已交付，参见 ADR-04 (PR #2)]
-*   **主场模块**：`public/materials/`, `server.py` (`/api/hydrate`, `/api/upload-material`), `public/app.js`
+### 阶段 7: MVP 4.0 (双引擎自主调度、多文献融合与 Obsidian 双向水合) —— [✅ 双引擎与高帧率渲染已交付(PR #2)，参见 ADR-04；跨文献水合顺延演进中]
+*   **主场模块**：`public/materials/`, `server.py` (`/api/test-connection`, `/api/hydrate`, `/api/upload-material`), `public/app.js`
 *   **核心突破**：
-    1. **多文献库管理 (Multi-Document Shelf) [✅ 基础上传与切换底座已由 PR #1 交付]**：支持在阅读器中自由上传本地 PDF/MD 文献（`POST /api/upload-material`），并通过下拉选择器自由切换，文献与课题会话（`session.activeDoc`）实现解耦隔离；后续进阶双栏并排比对；
-    2. **跨文献实证图谱融合 (Cross-Paper Fusion)**：基于 MVP 3.5 的章节大纲经纬度，将来自【论文 A 弱散射章节】与【论文 B 玻恩近似章节】的实证卡片同时连入同一个课题节点，由大模型进行交叉比对（Cross-Examination），自动挖掘理论冲突与学术空白；
-    3. **Obsidian 静态知识库与动态 DAG 画布双向水合 (Bidirectional Obsidian Hydration Pipeline)**：
+    1. **双引擎自适应分发、密钥安全管理与 120Hz 硬件加速 [✅ PR #2 已交付，参见 ADR-04]**：
+       * **双引擎路由解耦**：深度推理大模型（DeepSeek-V4 Pro / R1, Qwen3.8-Max 等）与视觉模型（Qwen2.5-VL-72B, qwen-vl-max 等）解耦，`resolve_vision_model` 守卫自动分发截框公式 OCR；
+       * **服务商密钥隔离记忆**：`localStorage.axiomflow_provider_keys` 按服务商安全记忆，提供 `/api/test-connection` 毫秒级探测；
+       * **120Hz 硬件加速与因果聚焦**：`updateConnectedEdges` 增量连线算法（0 DOM 销毁）与 GPU 矩阵缩放；拓扑因果聚焦（Topology Focus）智能高亮直接依赖链；
+    2. **多文献库管理 (Multi-Document Shelf) [✅ 基础上传与切换底座已由 PR #1 交付]**：支持在阅读器中自由上传本地 PDF/MD 文献（`POST /api/upload-material`），并通过下拉选择器自由切换，文献与课题会话（`session.activeDoc`）实现解耦隔离；后续进阶双栏并排比对；
+    3. **跨文献实证图谱融合 (Cross-Paper Fusion)**：基于 MVP 3.5 的章节大纲经纬度，将来自【论文 A 弱散射章节】与【论文 B 玻恩近似章节】的实证卡片同时连入同一个课题节点，由大模型进行交叉比对（Cross-Examination），自动挖掘理论冲突与学术空白；
+    4. **Obsidian 静态知识库与动态 DAG 画布双向水合 (Bidirectional Obsidian Hydration Pipeline)**：
        * **静态笔记 $\to$ 动态 DAG 拓扑反演**：输入任一 Obsidian 概念（如 `[[虚拟内存]]`），后端自动扫描解析其入链与出链依赖，在画布上一键展开为包含前置公理与衍生结论的局部因果子图；
        * **动态推演 $\to$ 结构化笔记结晶**：画布探究完成后，支持将当前有效祖先推演链路一键结晶导出为符合 Obsidian 规范、携带标准 Wikilinks 与学术锚点的复盘 Markdown 笔记，实现知识资产沉淀闭环。
 *   **验收标准**：
-    1. 系统能同时容纳多份 PDF 资产，并在单一画布上完成跨文献的有向因果连线与学术异同辨析；
-    2. 输入本地 Obsidian 笔记路径后，可在 0.5 秒内将其概念网水合展开为可视化的 DAG 推演分支；推演完毕可一键回写生成新笔记。
+    1. **[✅ 已达标]** 切换至 DeepSeek-V4 Pro 推理时，框选公式切片能自动交由 Qwen2.5-VL-72B 解析；点击连通性测试 1 秒内回显延迟；画布节点拖拽达到 60~120fps 丝滑；
+    2. **[⏳ 顺延中]** 系统能同时容纳多份 PDF 资产，并在单一画布上完成跨文献的有向因果连线与学术异同辨析；
+    3. **[⏳ 顺延中]** 输入本地 Obsidian 笔记路径后，可在 0.5 秒内将其概念网水合展开为可视化的 DAG 推演分支；推演完毕可一键回写生成新笔记。
 
 ### 阶段 8: MVP 4.5 (数学物理数值仿真、形式化求解与微观系统原生沙盒 / Symbolic, Numeric, Formal & System Tracers) —— [规划中]
 *   **主场模块**：`server.py` (`/api/execute-tracer`, `/api/z3-solve`), `computational_backend/`, `public/app.js`
