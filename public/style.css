@@ -377,6 +377,12 @@ body {
   background: rgba(16, 185, 129, 0.25);
 }
 
+.btn-success.active {
+  background: rgba(16, 185, 129, 0.3);
+  border-color: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.35);
+}
+
 /* 画布视口 */
 .canvas-container {
   width: 100vw;
@@ -495,6 +501,16 @@ body {
   border-left: 4px solid #a855f7;
 }
 
+.node.tracer {
+  border-left: 4px solid #3b82f6;
+}
+
+.node.tracer .node-content {
+  max-height: none;
+  overflow-y: visible;
+  padding: 8px 10px;
+}
+
 .node.pending {
   animation: pulse-border 1.5s infinite;
 }
@@ -552,6 +568,11 @@ body {
 .badge-hardware_probe {
   background: rgba(168, 85, 247, 0.18);
   color: #c084fc;
+}
+
+.badge-tracer {
+  background: rgba(59, 130, 246, 0.18);
+  color: #60a5fa;
 }
 
 .node-title {
@@ -2700,6 +2721,23 @@ body {
 [data-theme="light"] .badge-hardware_probe {
   background: rgba(147, 51, 234, 0.15);
   color: #7e22ce;
+}
+
+[data-theme="light"] .badge-tracer {
+  background: rgba(37, 99, 235, 0.15);
+  color: #1d4ed8;
+}
+
+.tracer-container {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+.tracer-fullscreen-host {
+  width: 100%;
+  min-height: 420px;
 }
 
 /* 下游端口快速断线与依赖管理气泡 */

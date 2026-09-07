@@ -325,6 +325,8 @@ function createNodeElement(node) {
   div.dataset.id = node.id;
   if (node.width) {
     div.style.width = `${node.width}px`;
+  } else if (node.kind === 'tracer') {
+    div.style.width = '740px';
   }
 
   const kindNames = {
@@ -332,7 +334,8 @@ function createNodeElement(node) {
     material: '文献实证',
     conclusion: '综合结论',
     source_code: '源码实证',
-    hardware_probe: '硬件探针'
+    hardware_probe: '硬件探针',
+    tracer: '微观沙盒'
   };
 
   let statusBadge = '';
@@ -396,13 +399,15 @@ function createNodeElement(node) {
              <div class="disasm-box">${formatDisassemblyHtml(node.disassembly)}</div>
            ` : ''}
            ${node.notes ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 6px; font-style: italic;">备注: ${escapeHtml(node.notes)}</div>` : ''}`
+        : node.kind === 'tracer'
+        ? `<div class="tracer-container" id="tracer-host-${node.id}"></div>`
         : `${anchorBadgeHtml}
            <div class="card-question-text" style="font-weight: 600; color: var(--text-primary); line-height: 1.45; cursor: text;" title="点击可直接在右侧面板编辑问题">${renderMarkdown(node.question || '<em>(点击在此输入具体科研问题...)</em>')}</div>
            <div class="markdown-body" style="margin-top: 8px;">${isGenerating ? '<span style="color: #38bdf8;">模型正在深度严密推演中...</span>' : renderMarkdown(node.response || '(点击右侧请求生成)')}</div>`
       }
     </div>
     <div class="node-footer">
-      <span>${node.kind === 'material' ? '客观事实锚点' : (node.kind === 'source_code' ? '源码公理锚点' : (node.kind === 'hardware_probe' ? '硬件物理快照' : '模型思考单元'))}</span>
+      <span>${node.kind === 'material' ? '客观事实锚点' : (node.kind === 'source_code' ? '源码公理锚点' : (node.kind === 'hardware_probe' ? '硬件物理快照' : (node.kind === 'tracer' ? '可探索微观沙盒' : '模型思考单元')))}</span>
       <div style="font-size: 10.5px; color: #64748b;">双击全屏</div>
       <div class="node-resize-handle" title="拖拽调整卡片宽度"></div>
     </div>
@@ -486,7 +491,7 @@ function createNodeElement(node) {
 
   // 节点拖拽
   div.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select, .node-resize-handle')) return;
+    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select, .node-resize-handle, .tracer-container')) return;
     draggingNodeId = node.id;
     dragStartPos = { x: e.clientX, y: e.clientY };
     isActuallyDragging = false;
@@ -497,6 +502,25 @@ function createNodeElement(node) {
     };
     e.stopPropagation();
   });
+
+  if (node.kind === 'tracer') {
+    setTimeout(() => {
+      const tracerHost = div.querySelector(`#tracer-host-${node.id}`);
+      if (tracerHost) {
+        const tracerName = node.tracer || 'socket_lifecycle';
+        import(`/tracers/${tracerName}.js?t=${Date.now()}`)
+          .then(mod => {
+            if (mod && typeof mod.mountTracer === 'function') {
+              mod.mountTracer(tracerHost, node.params || {});
+            }
+          })
+          .catch(err => {
+            console.error(`Failed to load tracer: ${tracerName}`, err);
+            tracerHost.innerHTML = `<div style="padding: 12px; color: #ef4444; font-size: 12px;">沙盒模块加载失败: ${escapeHtml(err.message)}</div>`;
+          });
+      }
+    }, 0);
+  }
 
   return div;
 }
@@ -823,6 +847,18 @@ function updateContextInspector() {
           <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">反汇编指令流：</label>
           <textarea id="node-edit-disasm" class="inquiry-textarea" rows="4" style="font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 11px; white-space: pre;">${escapeHtml(node.disassembly || '')}</textarea>
         </div>
+      ` : node.kind === 'tracer' ? `
+        <div style="margin-bottom: 8px;">
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">微观沙盒模块选择：</label>
+          <select id="node-edit-tracer" class="inquiry-textarea" style="height: 32px; font-size: 12px; font-family: monospace;">
+            <option value="socket_lifecycle" ${(!node.tracer || node.tracer === 'socket_lifecycle') ? 'selected' : ''}>socket_lifecycle (CS:APP 第11章 并发套接字)</option>
+            <option value="cache_direct_mapped" ${node.tracer === 'cache_direct_mapped' ? 'selected' : ''}>cache_direct_mapped (CS:APP 第6章 直接映射Cache)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">沙盒设计与教学目标：</label>
+          <textarea id="node-edit-question" class="inquiry-textarea" rows="3" placeholder="在此输入沙盒教学目标或实验指引...">${escapeHtml(node.question || '')}</textarea>
+        </div>
       ` : `
         <div>
           <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">待解答问题 / 探索指令：</label>
@@ -948,6 +984,26 @@ function updateContextInspector() {
       const liveNode = graph.nodes.find(n => n.id === node.id);
       if (liveNode) liveNode.notes = e.target.value;
       debouncedSave();
+    };
+  }
+
+  // 微观沙盒模块名称与类型切换联动
+  const tracerInput = document.getElementById('node-edit-tracer');
+  if (tracerInput) {
+    tracerInput.onchange = (e) => {
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.tracer = e.target.value.trim();
+        if (liveNode.tracer === 'cache_direct_mapped') {
+          liveNode.title = '直接映射 Cache 命中与缺失单步推演 (CS:APP 第 6 章)';
+          liveNode.question = '探索 8-bit 地址总线下 Tag/Set Index/Offset 硬件拆分与冲突缺失/颠簸机理';
+        } else if (liveNode.tracer === 'socket_lifecycle') {
+          liveNode.title = '并发套接字生命周期单步器 (CS:APP 第 11 章)';
+          liveNode.question = '探索多进程并发服务器下描述符拷贝、引用计数(refcnt)与四次挥手触发机理';
+        }
+        renderNodes();
+        debouncedSave();
+      }
     };
   }
 
@@ -1303,6 +1359,12 @@ function openDrawer(tab) {
 
   activeTab = tab;
   drawer.classList.add('open');
+
+  const btnToggleReader = document.getElementById('btn-toggle-reader');
+  if (btnToggleReader) {
+    btnToggleReader.classList.toggle('active', tab === 'reader');
+  }
+
   if (tab === 'reader') {
     if (!drawer.style.width || drawer.style.width === '420px') {
       drawer.style.width = '50vw';
@@ -1331,6 +1393,18 @@ function openDrawer(tab) {
   });
   document.getElementById('inspector-panel').style.display = tab === 'inspector' ? 'block' : 'none';
   document.getElementById('reader-panel').style.display = tab === 'reader' ? 'flex' : 'none';
+}
+
+function closeDrawer() {
+  const pdfViewContainer = document.getElementById('pdf-view-container');
+  if (pdfViewContainer && currentDocMode === 'pdf' && pdfViewContainer.scrollTop > 0) {
+    lastSavedPdfScrollTop = pdfViewContainer.scrollTop;
+  }
+  drawer.classList.remove('open');
+  const btnToggleReader = document.getElementById('btn-toggle-reader');
+  if (btnToggleReader) {
+    btnToggleReader.classList.remove('active');
+  }
 }
 
 // ==========================================
@@ -3274,11 +3348,31 @@ function setupEventListeners() {
     updateStatus("已新建课题节点！请在右侧面板直接输入问题与标题。");
   };
 
-  const btnAddMaterial = document.getElementById('btn-add-material');
-  if (btnAddMaterial) btnAddMaterial.onclick = () => openDrawer('reader');
-
   const btnAddCode = document.getElementById('btn-add-code');
   if (btnAddCode) btnAddCode.onclick = () => openCodeModal();
+
+  const btnAddTracer = document.getElementById('btn-add-tracer');
+  if (btnAddTracer) {
+    btnAddTracer.onclick = () => {
+      const newId = `n_tracer_${Date.now()}`;
+      const screenCenter = screenToWorld(window.innerWidth / 3, window.innerHeight / 2.5);
+      graph.nodes.push({
+        id: newId,
+        kind: 'tracer',
+        tracer: 'socket_lifecycle',
+        title: '并发套接字生命周期单步器 (CS:APP 第 11 章)',
+        question: '探索多进程并发服务器下描述符拷贝、引用计数(refcnt)与四次挥手触发机理',
+        width: 740,
+        x: Math.max(40, screenCenter.x - 200),
+        y: Math.max(40, screenCenter.y - 120)
+      });
+      saveGraph();
+      renderNodes();
+      requestAnimationFrame(() => renderEdges());
+      selectNode(newId);
+      updateStatus("已创建微观系统沙盒卡片！");
+    };
+  }
 
   const btnCloseCodeModal = document.getElementById('btn-close-code-modal');
   if (btnCloseCodeModal) btnCloseCodeModal.onclick = () => closeCodeModal();
@@ -3363,7 +3457,16 @@ function setupEventListeners() {
   }
 
   const btnToggleReader = document.getElementById('btn-toggle-reader');
-  if (btnToggleReader) btnToggleReader.onclick = () => openDrawer('reader');
+  if (btnToggleReader) {
+    btnToggleReader.onclick = () => {
+      const isReaderOpen = drawer.classList.contains('open') && activeTab === 'reader';
+      if (isReaderOpen) {
+        closeDrawer();
+      } else {
+        openDrawer('reader');
+      }
+    };
+  }
 
   const btnResetDemo = document.getElementById('btn-reset-demo');
   if (btnResetDemo) {
@@ -3906,7 +4009,7 @@ function setupEventListeners() {
   });
 
   document.getElementById('btn-close-drawer').onclick = () => {
-    drawer.classList.remove('open');
+    closeDrawer();
   };
 
   // 缩放控制按钮
@@ -4427,7 +4530,8 @@ function openCardFullscreen(node) {
     question: '探索课题',
     conclusion: '综合结论',
     source_code: '源码实证',
-    hardware_probe: '硬件探针'
+    hardware_probe: '硬件探针',
+    tracer: '微观沙盒'
   };
 
   const badgeEl = document.getElementById('modal-card-badge');
@@ -4479,6 +4583,19 @@ function openCardFullscreen(node) {
       ` : ''}
       ${node.notes ? `<div style="font-size: 12.5px; color: #94a3b8; font-style: italic; margin-top: 10px;">调试断点备注: ${escapeHtml(node.notes)}</div>` : ''}
     `;
+  } else if (node.kind === 'tracer') {
+    bodyEl.innerHTML = `<div class="tracer-fullscreen-host" id="modal-tracer-host"></div>`;
+    const host = document.getElementById('modal-tracer-host');
+    const tracerName = node.tracer || 'socket_lifecycle';
+    import(`/tracers/${tracerName}.js?t=${Date.now()}`)
+      .then(mod => {
+        if (mod && typeof mod.mountTracer === 'function') {
+          mod.mountTracer(host, node.params || {});
+        }
+      })
+      .catch(err => {
+        host.innerHTML = `<div style="padding: 12px; color: #ef4444; font-size: 12px;">沙盒模块加载失败: ${escapeHtml(err.message)}</div>`;
+      });
   } else {
     bodyEl.innerHTML = `
       <div style="background: rgba(99, 102, 241, 0.08); border-left: 4px solid #6366f1; border-radius: 0 8px 8px 0; padding: 14px 18px; margin-bottom: 20px;">

@@ -2,11 +2,18 @@
   "activeId": "session_1788660701302",
   "sessions": [
     {
+      "id": "session_1788786069461",
+      "title": "TLA",
+      "createdAt": 1788786069463,
+      "updatedAt": 1788786118717,
+      "nodeCount": 1
+    },
+    {
       "id": "session_1788660701302",
       "title": "Transformer",
       "createdAt": 1788660701309,
-      "updatedAt": 1788778623593,
-      "nodeCount": 7
+      "updatedAt": 1788787506942,
+      "nodeCount": 9
     },
     {
       "id": "session_1788441684256",
