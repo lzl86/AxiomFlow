@@ -259,6 +259,7 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                         "qwen-vl-max",
                         "gemini-3.8-flash-high",
                         "gemini-3.8-flash-medium",
+                        "gemini-3.1-pro",
                         "gemini-2.5-pro",
                         "claude-3-5-sonnet-20241022",
                         "claude-opus-4-5-thinking",

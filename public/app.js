@@ -2844,14 +2844,14 @@ function setupEventListeners() {
       defaultKey: 'sk-antigravity',
       models: [
         { id: 'gemini-3.8-flash-high', name: 'gemini-3.8-flash-high (Google 深度思考 · 推荐)' },
-        { id: 'gemini-2.5-pro', name: 'gemini-2.5-pro (长上下文/深度逻辑)' },
+        { id: 'gemini-3.1-pro', name: 'gemini-3.1-pro (长上下文/深度逻辑)' },
         { id: 'gemini-2.5-flash', name: 'gemini-2.5-flash (极速响应)' },
         { id: 'claude-3-5-sonnet-20241022', name: 'claude-3-5-sonnet (代码与系统架构)' },
         { id: 'gpt-4o', name: 'gpt-4o (OpenAI 全模态旗舰)' }
       ],
       vision_models: [
         { id: 'gemini-3.8-flash-high', name: 'gemini-3.8-flash-high (高精度 LaTeX 公式 OCR · 推荐)' },
-        { id: 'gemini-2.5-pro', name: 'gemini-2.5-pro (深度图表解析)' },
+        { id: 'gemini-3.1-pro', name: 'gemini-3.1-pro (深度图表解析)' },
         { id: 'gpt-4o', name: 'gpt-4o (视觉解析)' }
       ]
     },
