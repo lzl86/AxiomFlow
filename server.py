@@ -468,6 +468,7 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 initial_graph = {
                     "version": "1.0.0",
                     "project": title,
+                    "annotations": [],
                     "nodes": [
                         {
                             "id": f"n_q_{int(time.time() * 1000)}",

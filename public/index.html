@@ -150,6 +150,7 @@
         <!-- PDF 原生导航控制器 (单行合并) -->
         <div id="pdf-toolbar" class="pdf-compact-bar" style="display: none;">
           <button id="btn-toggle-outline" class="btn btn-xs" title="展开/收起文献章节目录大纲">📑 目录</button>
+          <button id="btn-reader-annotations" class="btn btn-xs" title="当前文献批注统计 (点击在批注间连续定位)">📝 批注 (<span id="reader-ann-count">0</span>)</button>
           <button id="pdf-prev" class="btn btn-xs" title="上一页">◀</button>
           <span class="pdf-page-indicator"><input id="pdf-page-input" type="number" value="1" min="1"> / <span id="pdf-page-count">-</span></span>
           <button id="pdf-next" class="btn btn-xs" title="下一页">▶</button>
@@ -158,13 +159,6 @@
           <span id="pdf-zoom-level" class="pdf-zoom-label">自适应</span>
           <button id="pdf-zoom-in" class="btn btn-xs" title="放大">+</button>
         </div>
-      </div>
-
-      <!-- 划词浮动工具栏 -->
-      <div id="extract-toolbar" style="display: none; position: sticky; top: 0; z-index: 100; margin-bottom: 10px;">
-        <button onclick="extractSelectedToCanvas()" class="btn btn-success" style="width: 100%; justify-content: center; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);">
-          ✨ 将圈选文字摘录至画布 (生成证据锚点)
-        </button>
       </div>
 
       <!-- 视图 1：Markdown 文本文档视图 -->
@@ -495,6 +489,78 @@
     <button id="sel-btn-material" class="sel-btn" title="将此文本存为独立的文献实证节点 (快捷键: E)">
       <span class="sel-icon">📖</span> 存为实证 <span class="hotkey-hint">E</span>
     </button>
+  </div>
+
+  <!-- 小说级教材划线与认知状态批注工具栏 (Reader Annotation Toolbar) -->
+  <div id="reader-annotation-toolbar" class="reader-annotation-toolbar" style="display: none;">
+    <div class="ann-toolbar-statuses">
+      <button class="ann-tool-btn status-understood" data-status="understood" title="✅ 已掌握：概念清晰内化">
+        <span class="ann-status-icon">✅</span>
+        <span class="ann-status-name">已掌握</span>
+      </button>
+      <button class="ann-tool-btn status-confused" data-status="confused" title="🤔 有疑问：似懂非懂需思考">
+        <span class="ann-status-icon">🤔</span>
+        <span class="ann-status-name">有疑问</span>
+      </button>
+      <button class="ann-tool-btn status-lost" data-status="lost" title="❌ 未掌握：完全陌生需补课">
+        <span class="ann-status-icon">❌</span>
+        <span class="ann-status-name">未掌握</span>
+      </button>
+      <button class="ann-tool-btn status-inspired" data-status="inspired" title="💡 灵感：触发联想或假说">
+        <span class="ann-status-icon">💡</span>
+        <span class="ann-status-name">灵感</span>
+      </button>
+      <button class="ann-tool-btn status-memorize" data-status="memorize" title="⭐ 需精背：核心定理需背诵">
+        <span class="ann-status-icon">⭐</span>
+        <span class="ann-status-name">需精背</span>
+      </button>
+    </div>
+    <div class="ann-toolbar-divider"></div>
+    <div class="ann-toolbar-actions">
+      <button class="ann-action-btn" id="btn-ann-write-note" title="✏️ 写想法/做便签">
+        <span class="ann-action-icon">✏️</span>
+        <span>写想法</span>
+      </button>
+      <button class="ann-action-btn" id="btn-ann-to-canvas" title="📌 摘录为画布实证节点 (快捷键 E)">
+        <span class="ann-action-icon">📌</span>
+        <span>入图</span>
+      </button>
+      <button class="ann-action-btn" id="btn-ann-copy" title="📋 复制划线内容">
+        <span class="ann-action-icon">📋</span>
+        <span>复制</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 批注便签气泡卡片 (Note Bubble) -->
+  <div id="reader-note-bubble" class="reader-note-bubble" style="display: none;">
+    <div class="bubble-header">
+      <div class="bubble-status-group">
+        <button class="bubble-status-pill" data-status="understood" title="标记为：已掌握">✅</button>
+        <button class="bubble-status-pill" data-status="confused" title="标记为：有疑问">🤔</button>
+        <button class="bubble-status-pill" data-status="lost" title="标记为：未掌握">❌</button>
+        <button class="bubble-status-pill" data-status="inspired" title="标记为：灵感">💡</button>
+        <button class="bubble-status-pill" data-status="memorize" title="标记为：需精背">⭐</button>
+        <span class="bubble-status-text" id="bubble-status-label">已掌握</span>
+      </div>
+      <div class="bubble-header-actions">
+        <span id="bubble-page-info" class="bubble-page-badge">P.1</span>
+        <button id="bubble-btn-delete" class="bubble-icon-btn text-danger" title="删除批注">🗑️</button>
+        <button id="bubble-btn-close" class="bubble-icon-btn" title="关闭便签 (Esc)">✕</button>
+      </div>
+    </div>
+    <div class="bubble-quote" id="bubble-quote" title="划线原文"></div>
+    <div class="bubble-body">
+      <textarea id="bubble-note-input" class="bubble-textarea" placeholder="写下你的思维留迹、疑问或推演笔记 (自动保存)..." rows="3"></textarea>
+    </div>
+    <div class="bubble-footer">
+      <span class="bubble-save-status" id="bubble-save-status">已自动保存</span>
+      <div class="bubble-footer-actions">
+        <button id="bubble-btn-canvas" class="btn btn-xs" style="background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.4); color: #818cf8;" title="推入画布生成实证节点">
+          ✨ 推入画布
+        </button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="./app.js"></script>
