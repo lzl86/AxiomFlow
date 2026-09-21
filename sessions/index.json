@@ -2,6 +2,13 @@
   "activeId": "session_1788660701302",
   "sessions": [
     {
+      "id": "session_1788838683398",
+      "title": "王京凡-博士学位论文-差分相衬显微成像中照明调制方法及应用研究(1)",
+      "createdAt": 1788838683426,
+      "updatedAt": 1788841879252,
+      "nodeCount": 3
+    },
+    {
       "id": "session_1788786069461",
       "title": "TLA",
       "createdAt": 1788786069463,
@@ -19,7 +26,7 @@
       "id": "session_1788441684256",
       "title": "惠更斯-菲涅耳原理",
       "createdAt": 1788441684264,
-      "updatedAt": 1788660700981,
+      "updatedAt": 1788838683218,
       "nodeCount": 17
     },
     {

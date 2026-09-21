@@ -153,7 +153,8 @@
 
         <!-- PDF 原生导航控制器 (单行合并) -->
         <div id="pdf-toolbar" class="pdf-compact-bar" style="display: none;">
-          <button id="btn-toggle-outline" class="btn btn-xs" title="展开/收起文献章节目录大纲">[目录]</button>
+          <button id="btn-toggle-outline" class="btn btn-xs" title="展开/收起文献章节目录大纲">📑 目录</button>
+          <button id="btn-reader-annotations" class="btn btn-xs" title="当前文献批注统计 (点击在批注间连续定位)">📝 批注 (<span id="reader-ann-count">0</span>)</button>
           <button id="btn-neighborhood-probe" class="btn btn-xs" style="background: rgba(99, 102, 241, 0.18); border-color: rgba(99, 102, 241, 0.4); color: #a5b4fc;" title="对当前阅读页执行前后2页邻域切片研读">[邻域研读]</button>
           <button id="pdf-prev" class="btn btn-xs" title="上一页">◀</button>
           <span class="pdf-page-indicator"><input id="pdf-page-input" type="number" value="1" min="1"> / <span id="pdf-page-count">-</span></span>
@@ -171,7 +172,6 @@
           [摘录] 将圈选文字摘录至画布 (生成证据锚点)
         </button>
       </div>
-
       <!-- 视图 1：Markdown 文本文档视图 -->
       <div id="paper-content" style="font-size: 12.5px; line-height: 1.6; color: #cbd5e1; user-select: text; overflow-y: auto; flex: 1; min-height: 0;">
         正在载入文献...
@@ -193,8 +193,54 @@
           </div>
         </aside>
 
+        <!-- 左侧学习批注清单抽屉面板 -->
+        <aside id="pdf-annotations-panel" class="pdf-annotations-panel" style="display: none; width: 280px; min-width: 240px; max-width: 360px; background: rgba(15, 23, 42, 0.95); border: 1px solid var(--border-color); border-radius: 6px; flex-direction: column; overflow: hidden; font-size: 12px; z-index: 40; flex-shrink: 0;">
+          <div class="ann-panel-header">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.2);">
+              <span style="font-weight: 600; color: #f1f5f9; display: flex; align-items: center; gap: 6px; font-size: 12px;">
+                <span>📝 学习批注手记</span>
+                <span id="ann-panel-total-badge" class="ann-count-badge">0</span>
+              </span>
+              <button id="btn-close-ann-panel" class="btn" style="padding: 1px 6px; font-size: 11px;" title="收起批注列表">✕</button>
+            </div>
+            <!-- 搜索框 -->
+            <div style="padding: 6px 8px; border-bottom: 1px solid var(--border-color);">
+              <input id="ann-search-input" type="text" class="ann-search-box" placeholder="🔍 搜索批注文字或想法便签...">
+            </div>
+            <!-- 6态过滤器胶囊 -->
+            <div class="ann-filter-bar">
+              <button class="ann-filter-pill active" data-filter="all">全部</button>
+              <button class="ann-filter-pill" data-filter="understood">✅ 掌握</button>
+              <button class="ann-filter-pill" data-filter="confused">🤔 疑问</button>
+              <button class="ann-filter-pill" data-filter="lost">❌ 盲区</button>
+              <button class="ann-filter-pill" data-filter="inspired">💡 灵感</button>
+              <button class="ann-filter-pill" data-filter="memorize">⭐ 重点</button>
+            </div>
+          </div>
+          <!-- 批注卡片滚动容器 -->
+          <div id="ann-cards-list" class="ann-cards-list">
+            <!-- 动态注入批注卡片 -->
+          </div>
+          <!-- 底部汇总统计 -->
+          <div class="ann-panel-footer">
+            <span id="ann-filter-summary">共 0 条批注</span>
+            <button id="btn-ann-jump-next" class="btn btn-xs" title="定位到下一条批注">⏭️ 轮转定位</button>
+          </div>
+        </aside>
+
         <!-- 右侧 PDF 原生连续垂直滚动视图 (支持公式/插图秒级渲染与高精度截框) -->
         <div id="pdf-view-container" style="flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; background: #0b0f19; border-radius: 6px; border: 1px solid var(--border-color); text-align: center; padding: 14px 0; scroll-behavior: smooth;">
+          <!-- 续读引导通知条 -->
+          <div id="reader-resume-banner" class="reader-resume-banner" style="display: none;">
+            <div class="resume-banner-content">
+              <span class="resume-icon">📍</span>
+              <span id="resume-banner-text">检测到上次阅读进度：第 1 页</span>
+            </div>
+            <div class="resume-banner-actions">
+              <button id="btn-resume-jump" class="btn btn-xs btn-primary">恢复阅读</button>
+              <button id="btn-resume-dismiss" class="btn btn-xs">✕</button>
+            </div>
+          </div>
           <div id="pdf-continuous-scroll" style="display: block; position: relative; margin: 0 auto; text-align: center; width: 100%;">
             <!-- 动态按需渲染所有连续页 -->
           </div>
@@ -360,7 +406,7 @@ void eval(char *cmdline) {
             <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">一键切换服务商预设</label>
             <span style="font-size: 10.5px; color: #38bdf8;">点击即自动配齐模型与接口</span>
           </div>
-          <div class="provider-presets-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;">
+          <div class="provider-presets-grid" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px;">
             <button type="button" class="btn-preset-provider" data-provider="siliconflow" title="硅基流动：DeepSeek-V4 Pro / R1 + Qwen2.5-VL-72B">
               <span class="preset-flag">[国内]</span>
               <span class="preset-name">硅基流动</span>
@@ -376,6 +422,10 @@ void eval(char *cmdline) {
             <button type="button" class="btn-preset-provider" data-provider="localproxy" title="本地 Antigravity 代理：Gemini 3.8 / Claude 3.5 / GPT-4o">
               <span class="preset-flag">[本地]</span>
               <span class="preset-name">本地反代</span>
+            </button>
+            <button type="button" class="btn-preset-provider" data-provider="custom_proxy" title="自定义中转 / 反代：支持各类 OpenAI 兼容第三方反代中转 API">
+              <span class="preset-flag">[中转]</span>
+              <span class="preset-name">中转反代</span>
             </button>
             <button type="button" class="btn-preset-provider" data-provider="openai" title="OpenAI 官方：GPT-4o / o1 / o3-mini">
               <span class="preset-flag">[海外]</span>
@@ -395,7 +445,7 @@ void eval(char *cmdline) {
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
           <div>
             <label style="font-size: 12px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">接口基址 (API Base)</label>
-            <input id="cfg-api-base" type="text" class="inquiry-textarea" style="height: 38px; resize: none; font-size: 12px;" value="https://api.siliconflow.cn/v1">
+            <input id="cfg-api-base" type="text" class="inquiry-textarea" style="height: 38px; resize: none; font-size: 12px;" value="https://api.siliconflow.cn/v1" placeholder="例如: https://api.yourproxy.com/v1">
           </div>
           <div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -472,6 +522,52 @@ void eval(char *cmdline) {
     </div>
   </div>
 
+  <!-- 引擎连接异常诊断与自愈向导弹窗 -->
+  <div id="engine-diag-modal" class="modal-backdrop" style="display: none; z-index: 10000;">
+    <div class="modal-card" style="width: 540px; max-width: 95vw;">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">🔧</span>
+          <div>
+            <h3 id="diag-modal-title" style="font-size: 15px; font-weight: 600; color: #f87171; margin: 0;">大模型引擎连接诊断</h3>
+            <p id="diag-modal-subtitle" style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">检测到反向代理或模型接口通信异常</p>
+          </div>
+        </div>
+        <button id="btn-close-diag-modal" class="modal-close-btn" title="关闭诊断">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 18px 20px;">
+        <div id="diag-error-summary" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; color: #fca5a5; font-size: 12.5px; line-height: 1.5; font-weight: 500;">
+        </div>
+
+        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px;">
+          <div style="color: var(--text-secondary); margin-bottom: 4px; font-weight: 600;">📌 请求参数快照：</div>
+          <div style="display: flex; flex-direction: column; gap: 4px; font-family: monospace; font-size: 11.5px;">
+            <div>接口基址: <span id="diag-current-api-base" style="color: #38bdf8; word-break: break-all;"></span></div>
+            <div>指定模型: <span id="diag-current-model" style="color: #34d399;"></span></div>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">💡 智能排查建议：</div>
+          <ul id="diag-suggestions-list" style="margin: 0; padding-left: 18px; font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+          </ul>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+          <button type="button" id="btn-diag-quick-siliconflow" class="btn" style="font-size: 11.5px; background: rgba(56, 189, 248, 0.1); border-color: rgba(56, 189, 248, 0.3); color: #38bdf8;" title="若反代不可用，可一键切换为国内极速免费的硅基流动">
+            🇨🇳 切换为硅基流动预设
+          </button>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" id="btn-diag-close" class="btn">关闭</button>
+            <button type="button" id="btn-diag-open-config" class="btn btn-primary" style="padding: 7px 16px; font-size: 12px;">
+              ⚙️ 立即前往配置并测试
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 单卡片沉浸式全屏学术阅读弹窗 (双击卡片或点击卡片右上角放大图标触发) -->
   <div id="card-modal" class="modal-backdrop" style="display: none;">
     <div class="card-modal-container">
@@ -507,6 +603,78 @@ void eval(char *cmdline) {
     <button id="sel-btn-material" class="sel-btn" title="将此文本存为独立的文献实证节点 (快捷键: E)">
       <span class="sel-icon">[实证]</span> 存为实证 <span class="hotkey-hint">E</span>
     </button>
+  </div>
+
+  <!-- 小说级教材划线与认知状态批注工具栏 (Reader Annotation Toolbar) -->
+  <div id="reader-annotation-toolbar" class="reader-annotation-toolbar" style="display: none;">
+    <div class="ann-toolbar-statuses">
+      <button class="ann-tool-btn status-understood" data-status="understood" title="✅ 已掌握：概念清晰内化">
+        <span class="ann-status-icon">✅</span>
+        <span class="ann-status-name">已掌握</span>
+      </button>
+      <button class="ann-tool-btn status-confused" data-status="confused" title="🤔 有疑问：似懂非懂需思考">
+        <span class="ann-status-icon">🤔</span>
+        <span class="ann-status-name">有疑问</span>
+      </button>
+      <button class="ann-tool-btn status-lost" data-status="lost" title="❌ 未掌握：完全陌生需补课">
+        <span class="ann-status-icon">❌</span>
+        <span class="ann-status-name">未掌握</span>
+      </button>
+      <button class="ann-tool-btn status-inspired" data-status="inspired" title="💡 灵感：触发联想或假说">
+        <span class="ann-status-icon">💡</span>
+        <span class="ann-status-name">灵感</span>
+      </button>
+      <button class="ann-tool-btn status-memorize" data-status="memorize" title="⭐ 需精背：核心定理需背诵">
+        <span class="ann-status-icon">⭐</span>
+        <span class="ann-status-name">需精背</span>
+      </button>
+    </div>
+    <div class="ann-toolbar-divider"></div>
+    <div class="ann-toolbar-actions">
+      <button class="ann-action-btn" id="btn-ann-write-note" title="✏️ 写想法/做便签">
+        <span class="ann-action-icon">✏️</span>
+        <span>写想法</span>
+      </button>
+      <button class="ann-action-btn" id="btn-ann-to-canvas" title="📌 摘录为画布实证节点 (快捷键 E)">
+        <span class="ann-action-icon">📌</span>
+        <span>入图</span>
+      </button>
+      <button class="ann-action-btn" id="btn-ann-copy" title="📋 复制划线内容">
+        <span class="ann-action-icon">📋</span>
+        <span>复制</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 批注便签气泡卡片 (Note Bubble) -->
+  <div id="reader-note-bubble" class="reader-note-bubble" style="display: none;">
+    <div class="bubble-header">
+      <div class="bubble-status-group">
+        <button class="bubble-status-pill" data-status="understood" title="标记为：已掌握">✅</button>
+        <button class="bubble-status-pill" data-status="confused" title="标记为：有疑问">🤔</button>
+        <button class="bubble-status-pill" data-status="lost" title="标记为：未掌握">❌</button>
+        <button class="bubble-status-pill" data-status="inspired" title="标记为：灵感">💡</button>
+        <button class="bubble-status-pill" data-status="memorize" title="标记为：需精背">⭐</button>
+        <span class="bubble-status-text" id="bubble-status-label">已掌握</span>
+      </div>
+      <div class="bubble-header-actions">
+        <span id="bubble-page-info" class="bubble-page-badge">P.1</span>
+        <button id="bubble-btn-delete" class="bubble-icon-btn text-danger" title="删除批注">🗑️</button>
+        <button id="bubble-btn-close" class="bubble-icon-btn" title="关闭便签 (Esc)">✕</button>
+      </div>
+    </div>
+    <div class="bubble-quote" id="bubble-quote" title="划线原文"></div>
+    <div class="bubble-body">
+      <textarea id="bubble-note-input" class="bubble-textarea" placeholder="写下你的思维留迹、疑问或推演笔记 (自动保存)..." rows="3"></textarea>
+    </div>
+    <div class="bubble-footer">
+      <span class="bubble-save-status" id="bubble-save-status">已自动保存</span>
+      <div class="bubble-footer-actions">
+        <button id="bubble-btn-canvas" class="btn btn-xs" style="background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.4); color: #818cf8;" title="推入画布生成实证节点">
+          ✨ 推入画布
+        </button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="./app.js"></script>

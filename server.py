@@ -3,6 +3,8 @@ import os
 import json
 import time
 import base64
+import re
+import socket
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -36,6 +38,119 @@ DEFAULT_CONFIG = {
     "vision_model": "gemini-3.8-flash-high",
     "temperature": 0.3
 }
+
+def sanitize_api_base(url: str) -> str:
+    """自动规范化反代与 API 基址：补全协议、补齐 /v1、剔除冗余 endpoint"""
+    if not url:
+        return ""
+    url = str(url).strip()
+    # 自动补全 http/https
+    if not url.startswith("http://") and not url.startswith("https://"):
+        if "127.0.0.1" in url or "localhost" in url:
+            url = "http://" + url
+        else:
+            url = "https://" + url
+    # 剔除末尾多余的 /chat/completions 或 /models
+    url = re.sub(r"/chat/completions/?$", "", url)
+    url = re.sub(r"/models/?$", "", url)
+    url = url.rstrip("/")
+    # 如果既没有以版本号（如 /v1, /v2, /compatible-mode/v1）结尾，也不是子路径，对于标准域名自动补齐 /v1
+    parsed = urllib.parse.urlparse(url)
+    if parsed.path == "" or parsed.path == "/":
+        url = url.rstrip("/") + "/v1"
+    return url
+
+def analyze_api_exception(e: Exception, api_base: str, model: str) -> dict:
+    """深度解析 API 与反向代理异常，提供人类可读的学术级诊断建议"""
+    err_str = str(e)
+    res = {
+        "ok": False,
+        "error_type": "generic",
+        "error": err_str,
+        "diagnostics": [],
+        "api_base": api_base,
+        "model": model
+    }
+    
+    if isinstance(e, urllib.error.HTTPError):
+        status_code = e.code
+        body_detail = ""
+        try:
+            raw_body = e.read().decode("utf-8")
+            err_json = json.loads(raw_body)
+            if "error" in err_json and isinstance(err_json["error"], dict):
+                body_detail = err_json["error"].get("message", "")
+            elif "message" in err_json:
+                body_detail = err_json.get("message", "")
+        except Exception:
+            pass
+        
+        if status_code == 401:
+            res["error_type"] = "auth_failed"
+            res["error"] = "API 密钥认证失败 (401 Unauthorized)"
+            res["diagnostics"] = [
+                "请检查【API Key】是否已正确填入，且无多余首尾空格",
+                "若使用反代/中转服务，请确认该 Key 在中转站内已激活且额度充足",
+                body_detail and f"服务商反馈: {body_detail}"
+            ]
+        elif status_code == 404:
+            res["error_type"] = "model_not_found"
+            res["error"] = f"模型或接口路径未找到 (404 Not Found)"
+            res["diagnostics"] = [
+                f"当前反代服务商可能未接入【{model}】，请在配置中手动输入反代支持的模型名（如 gpt-4o, deepseek-chat 等）",
+                f"检查反代地址【{api_base}】路径是否需包含 /v1",
+                body_detail and f"服务商反馈: {body_detail}"
+            ]
+        elif status_code == 429:
+            res["error_type"] = "rate_limit"
+            res["error"] = "请求被限频或账户额度耗尽 (429 Too Many Requests)"
+            res["diagnostics"] = [
+                "当前 API Key 的额度已用尽，或请求并发频率超过了服务商限制",
+                body_detail and f"服务商反馈: {body_detail}"
+            ]
+        elif status_code in (502, 503, 504):
+            res["error_type"] = "proxy_gateway_error"
+            res["error"] = f"反代上游网关异常 (HTTP {status_code})"
+            res["diagnostics"] = [
+                "反向代理服务器已连通，但其后端大模型服务商超时未响应",
+                "建议稍后重试，或在配置中切换至其他可用模型/服务商"
+            ]
+        else:
+            res["error"] = f"服务商返回 HTTP {status_code}: {body_detail or err_str}"
+            res["diagnostics"] = [body_detail or "请根据状态码核对反代网关日志"]
+            
+    elif isinstance(e, urllib.error.URLError) or "WinError 10061" in err_str or "ConnectionRefused" in err_str or "积极拒绝" in err_str:
+        res["error_type"] = "connection_refused"
+        is_local = "127.0.0.1" in api_base or "localhost" in api_base
+        if is_local:
+            res["error"] = f"本地反代/服务未启动 (目标计算机积极拒绝连接 [10061])"
+            res["diagnostics"] = [
+                f"系统尝试连接本地反代地址【{api_base}】，但本地端口未开启监听",
+                "若使用本地 OneAPI / NewAPI / 本地网关，请确认程序已运行（默认通常为 http://127.0.0.1:3000/v1）",
+                "若使用在线中转反代，请前往【⚙️ 引擎配置】将地址改为反代商提供的真实 HTTPS URL（如 https://api.xxx.com/v1）"
+            ]
+        else:
+            res["error"] = f"无法连接至反代服务器【{api_base}】"
+            res["diagnostics"] = [
+                "请检查反代域名或 IP 拼写是否正确",
+                "请检查网络连接是否正常，或反代服务器是否处于维护中"
+            ]
+    elif "timed out" in err_str.lower() or isinstance(e, socket.timeout):
+        res["error_type"] = "timeout"
+        res["error"] = f"连接反代服务器超时 (Timeout)"
+        res["diagnostics"] = [
+            f"请求地址【{api_base}】在设定时间内未响应",
+            "反代服务器网络延迟可能过高，或需检查代理与防火墙设置"
+        ]
+    else:
+        res["error"] = f"请求失败: {err_str}"
+        res["diagnostics"] = [
+            "请前往右上角【⚙️ 引擎与密钥配置】重新核对反代基址与密钥",
+            "点击【⚡ 测试连接】进行实时连通性诊断"
+        ]
+        
+    res["diagnostics"] = [d for d in res["diagnostics"] if d]
+    return res
 
 def resolve_vision_model(conf):
     """
@@ -354,6 +469,7 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 initial_graph = {
                     "version": "1.0.0",
                     "project": title,
+                    "annotations": [],
                     "nodes": [
                         {
                             "id": f"n_q_{int(time.time() * 1000)}",
@@ -560,32 +676,37 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
         elif parsed.path == "/api/config":
             try:
                 new_conf = json.loads(post_data.decode("utf-8"))
+                if "api_base" in new_conf:
+                    new_conf["api_base"] = sanitize_api_base(new_conf["api_base"])
                 conf = get_config()
                 conf.update(new_conf)
                 with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                     json.dump(conf, f, ensure_ascii=False, indent=2)
                 self.send_response(200)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({"ok": True, "config": conf}).encode("utf-8"))
+                self.wfile.write(json.dumps({"ok": True, "config": conf}, ensure_ascii=False).encode("utf-8"))
             except Exception as e:
                 self.send_response(500)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+                self.wfile.write(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode("utf-8"))
             return
 
         elif parsed.path == "/api/test-connection":
+            req_data = {}
+            api_base = ""
+            model = "deepseek-ai/DeepSeek-V4-Pro"
             try:
                 req_data = json.loads(post_data.decode("utf-8")) if post_data else {}
-                api_base = (req_data.get("api_base") or "").strip().rstrip("/")
+                api_base = sanitize_api_base(req_data.get("api_base") or "")
                 api_key = (req_data.get("api_key") or "").strip()
-                model = (req_data.get("model") or "gemini-3.8-flash-high").strip()
+                model = (req_data.get("model") or "deepseek-ai/DeepSeek-V4-Pro").strip()
 
                 if not api_base:
-                    raise ValueError("接口基址 (API Base) 不能为空")
+                    raise ValueError("接口基址 (API Base) 不能为空，请填写反代或服务商地址")
 
                 start_time = time.time()
                 chat_url = f"{api_base}/chat/completions"
@@ -603,7 +724,7 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                         "Content-Type": "application/json"
                     }
                 )
-                with urllib.request.urlopen(req, timeout=12) as res:
+                with urllib.request.urlopen(req, timeout=15) as res:
                     res.read()
                     latency_ms = int((time.time() - start_time) * 1000)
 
@@ -615,39 +736,16 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                     "ok": True,
                     "latency_ms": latency_ms,
                     "model": model,
+                    "sanitized_api_base": api_base,
                     "message": f"连接成功！响应延迟: {latency_ms}ms · 模型【{model}】就绪"
                 }, ensure_ascii=False).encode("utf-8"))
-            except urllib.error.HTTPError as he:
-                err_msg = str(he)
-                try:
-                    err_json = json.loads(he.read().decode("utf-8"))
-                    if "error" in err_json and isinstance(err_json["error"], dict):
-                        err_msg = err_json["error"].get("message", err_msg)
-                    elif "message" in err_json:
-                        err_msg = err_json.get("message", err_msg)
-                except Exception:
-                    pass
-                if he.code == 401:
-                    err_msg = f"API 密钥认证失败 (401 Unauthorized)，请检查 Key 是否填写正确。[{err_msg}]"
-                elif he.code == 404:
-                    err_msg = f"模型或接口未找到 (404 Not Found)，请确认服务商是否支持【{model}】。[{err_msg}]"
-                else:
-                    err_msg = f"服务商返回错误 (HTTP {he.code}): {err_msg}"
-                
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps({"ok": False, "error": err_msg}, ensure_ascii=False).encode("utf-8"))
             except Exception as e:
+                diag = analyze_api_exception(e, api_base or (req_data.get("api_base") or ""), model)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({
-                    "ok": False,
-                    "error": f"无法连接至服务地址: {str(e)}"
-                }, ensure_ascii=False).encode("utf-8"))
+                self.wfile.write(json.dumps(diag, ensure_ascii=False).encode("utf-8"))
             return
 
         elif parsed.path == "/api/fetch-models":
@@ -692,6 +790,9 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
             return
 
         elif parsed.path == "/api/generate":
+            req_data = {}
+            api_base = ""
+            model = ""
             try:
                 req_data = json.loads(post_data.decode("utf-8"))
                 node_id = req_data.get("nodeId")
@@ -699,9 +800,9 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 neighborhood_context = req_data.get("neighborhood_context")
                 source_anchor = req_data.get("source_anchor")
                 conf = get_config()
-                model = req_data.get("model") or conf.get("model", "gemini-2.5-flash")
-                api_base = conf.get("api_base", "http://127.0.0.1:8046/v1")
-                api_key = conf.get("api_key", "")
+                model = req_data.get("model") or conf.get("model", "deepseek-ai/DeepSeek-V4-Pro")
+                api_base = sanitize_api_base(conf.get("api_base", "https://api.siliconflow.cn/v1"))
+                api_key = conf.get("api_key", "").strip()
                 temp = conf.get("temperature", 0.3)
                 req_session_id = req_data.get("sessionId")
                 target_file = get_session_file(req_session_id)
@@ -772,7 +873,7 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                     chat_url,
                     data=json.dumps(payload).encode("utf-8"),
                     headers={
-                        "Authorization": f"Bearer {api_key}",
+                        "Authorization": f"Bearer {api_key}" if api_key else "",
                         "Content-Type": "application/json"
                     }
                 )
@@ -819,13 +920,14 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                     "response": answer_text,
                     "model": model,
                     "mtime": target_file.stat().st_mtime
-                }).encode("utf-8"))
+                }, ensure_ascii=False).encode("utf-8"))
             except Exception as e:
-                self.send_response(500)
+                diag = analyze_api_exception(e, api_base or "未设置", model or "未指定")
+                self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+                self.wfile.write(json.dumps(diag, ensure_ascii=False).encode("utf-8"))
             return
 
         elif parsed.path == "/api/ask":
@@ -864,14 +966,16 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
             return
 
         elif parsed.path == "/api/ocr-formula":
+            api_base = ""
+            model = ""
             try:
                 req_data = json.loads(post_data.decode("utf-8"))
                 image_url = req_data.get("imageUrl")
                 citation = req_data.get("citation", "文献截框")
                 
                 conf = get_config()
-                api_base = conf.get("api_base", "http://127.0.0.1:8046/v1").rstrip("/")
-                api_key = conf.get("api_key", "sk-fa35bb3e2d294734b6d82323a765531b")
+                api_base = sanitize_api_base(conf.get("api_base", "https://api.siliconflow.cn/v1"))
+                api_key = conf.get("api_key", "").strip()
                 # 智能解析视觉模型 (支持双引擎分发)
                 model = resolve_vision_model(conf)
                 
@@ -905,7 +1009,7 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                     data=req_body,
                     headers={
                         "Content-Type": "application/json",
-                        "Authorization": f"Bearer {api_key}"
+                        "Authorization": f"Bearer {api_key}" if api_key else ""
                     }
                 )
                 
@@ -917,14 +1021,15 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({"ok": True, "analysis": answer, "model_used": model}).encode("utf-8"))
+                self.wfile.write(json.dumps({"ok": True, "analysis": answer, "model_used": model}, ensure_ascii=False).encode("utf-8"))
             except Exception as e:
                 print("OCR Formula 异常:", e)
-                self.send_response(500)
+                diag = analyze_api_exception(e, api_base or "未设置", model or "未指定")
+                self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode("utf-8"))
+                self.wfile.write(json.dumps(diag, ensure_ascii=False).encode("utf-8"))
             return
 
         elif parsed.path == "/api/probe/gdb-dump":

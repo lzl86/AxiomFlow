@@ -134,6 +134,7 @@ async function init() {
   initTheme();
   setupEventListeners();
   initSelectionToolbar();
+  initReaderAnnotationSystem();
   updateZoomIndicator();
   await loadConfig();
   await loadSessions();
@@ -194,6 +195,8 @@ async function loadGraph() {
     graph = await res.json();
     if (!graph.nodes) graph.nodes = [];
     if (!graph.edges) graph.edges = [];
+    if (!graph.annotations) graph.annotations = [];
+    updateReaderAnnotationCount();
   } catch (err) {
     console.error('加载图谱失败:', err);
   }
@@ -1126,13 +1129,25 @@ async function generateAnswerForNode(node) {
       if (data.mtime) lastMtime = data.mtime;
       updateStatus(`${currentConfig.model} 已为 #${node.id} 生成解答`);
     } else {
-      alert("生成失败: " + (data.error || "未知异常"));
+      showEngineDiagnosticModal(data);
       liveNode.status = 'idle';
+      updateStatus(`❌ 推演失败: ${data.error || '未知异常'}`);
     }
   } catch (err) {
-    alert("网络异常: " + err.message);
+    showEngineDiagnosticModal({
+      ok: false,
+      error_type: 'network_error',
+      error: `前端网络请求中断: ${err.message}`,
+      api_base: currentConfig.api_base,
+      model: currentConfig.model,
+      diagnostics: [
+        "请检查本地 AxiomFlow 服务 (http://localhost:8765) 是否正常运行",
+        "检查浏览器是否安装了阻止本地请求的网络插件"
+      ]
+    });
     const liveNode = graph.nodes.find(n => n.id === node.id) || node;
     liveNode.status = 'idle';
+    updateStatus(`❌ 网络异常: ${err.message}`);
   } finally {
     saveGraph();
     renderNodes();
@@ -1446,12 +1461,12 @@ async function initDocumentSystem() {
     line.style.width = `${pct}%`;
   }
 
-  // 划词摘录监听 (Markdown 模式)
+  // 划词批注监听 (Markdown 模式)
   const mdContainer = document.getElementById('paper-content');
   if (mdContainer) {
-    mdContainer.onmouseup = () => {
+    mdContainer.onmouseup = (e) => {
       if (currentDocMode !== 'markdown') return;
-      handleSelectionToolbar('paper-content', currentDocTitle);
+      handlePdfTextSelection(e);
     };
     mdContainer.onscroll = () => {
       saveReadingBreakpoint();
@@ -1459,29 +1474,17 @@ async function initDocumentSystem() {
     };
   }
 
-  // PDF 划词摘录监听与滚动进度更新
+  // PDF 划词批注监听与连续滚动阅读进度指示
   const pdfViewContainer = document.getElementById('pdf-view-container');
   if (pdfViewContainer) {
-    pdfViewContainer.onmouseup = () => {
+    pdfViewContainer.onmouseup = (e) => {
       if (currentDocMode !== 'pdf') return;
-      handleSelectionToolbar('pdf-text-layer', `${currentDocTitle} (P.${currentPdfPageNum})`);
+      handlePdfTextSelection(e);
     };
-    pdfViewContainer.onscroll = () => {
+    pdfViewContainer.addEventListener('scroll', () => {
+      saveReadingBreakpoint();
       updateReadingProgressBar(pdfViewContainer);
-    };
-  }
-
-  function handleSelectionToolbar(containerId, citationText) {
-    const selection = window.getSelection();
-    const selectedText = selection ? selection.toString().trim() : '';
-    const toolbar = document.getElementById('extract-toolbar');
-    if (selectedText.length >= 3) {
-      toolbar.style.display = 'block';
-      toolbar.dataset.text = selectedText;
-      toolbar.dataset.citation = citationText;
-    } else {
-      toolbar.style.display = 'none';
-    }
+    }, { passive: true });
   }
 
   // 本地文件上传与解析
@@ -1592,6 +1595,8 @@ async function switchActiveDocument(docInfo, resetProgress = false) {
   } else {
     await loadMarkdownDocument(graph.activeDoc.url, graph.activeDoc.title, graph.activeDoc);
   }
+  updateReaderAnnotationCount();
+  renderAllVisibleAnnotations();
 }
 
 // 恢复当前课题绑定的文献资产与断点
@@ -1613,6 +1618,8 @@ async function restoreSessionActiveDoc() {
       await loadMarkdownDocument('/materials/sample_paper.md', '文献原文：Lost in the Middle');
     }
   }
+  updateReaderAnnotationCount();
+  renderAllVisibleAnnotations();
 }
 
 // 处理本地文献文件上传
@@ -1712,6 +1719,9 @@ async function loadPdfDocument(source, docTitle, savedState = null) {
   }
 
   try {
+    savedState = savedState ? { ...savedState } : null;
+    clearTimeout(breakpointSaveTimer);
+    isRestoringBreakpoint = true;
     updateStatus(`正在载入文献 PDF: ${docTitle} ...`);
     switchDocMode('pdf');
     currentDocTitle = docTitle;
@@ -1742,14 +1752,18 @@ async function loadPdfDocument(source, docTitle, savedState = null) {
 
     // 毫秒级无损复原断点滚动位置
     if (savedState && (savedState.scrollTop || savedState.currentPage > 1)) {
-      isRestoringBreakpoint = true;
       const viewContainer = document.getElementById('pdf-view-container');
       if (savedState.scrollTop && viewContainer) {
         viewContainer.scrollTop = savedState.scrollTop;
       } else {
         scrollToPage(targetPage, false);
       }
-      setTimeout(() => { isRestoringBreakpoint = false; }, 350);
+    }
+    setTimeout(() => { isRestoringBreakpoint = false; }, 350);
+
+    // Phase 2: 续读断点与批注引导
+    if (savedState && savedState.currentPage > 1) {
+      showResumeReadingBanner(savedState.currentPage);
     }
 
     // 异步加载并解析 PDF 章节目录大纲
@@ -1757,6 +1771,7 @@ async function loadPdfDocument(source, docTitle, savedState = null) {
 
     updateStatus(`PDF 已成功载入，共 ${currentPdfDoc.numPages} 页（已恢复至上次阅读位置）`);
   } catch (err) {
+    isRestoringBreakpoint = false;
     console.error("载入 PDF 失败:", err);
     updateStatus(`载入 PDF 异常: ${err.message}`);
   }
@@ -1771,15 +1786,72 @@ async function loadPdfOutline(doc) {
   try {
     const rawOutline = await doc.getOutline();
     if (!rawOutline || rawOutline.length === 0) {
+      currentPdfOutline = [];
       renderFallbackOutline(doc.numPages);
       return;
     }
 
     currentPdfOutline = await resolveOutlineDestinations(doc, rawOutline);
+    assignOutlineEndPages(currentPdfOutline, doc.numPages);
     renderOutlineTree(currentPdfOutline);
   } catch (err) {
     console.warn("解析 PDF 目录大纲失败:", err);
+    currentPdfOutline = [];
     renderFallbackOutline(doc.numPages);
+  }
+}
+
+// 递归计算每个大纲条目的终止页码范围
+function assignOutlineEndPages(items, totalPages) {
+  const flat = [];
+  function walk(list) {
+    list.forEach(it => {
+      if (it.pageNum) flat.push(it);
+      if (it.items && it.items.length > 0) walk(it.items);
+    });
+  }
+  walk(items);
+  flat.sort((a, b) => a.pageNum - b.pageNum);
+
+  for (let i = 0; i < flat.length; i++) {
+    const current = flat[i];
+    const next = flat.slice(i + 1).find(it => it.pageNum > current.pageNum);
+    current.endPage = next ? Math.max(current.pageNum, next.pageNum - 1) : totalPages;
+  }
+}
+
+// 计算指定页码范围内的认知健康度指标 (Heatmap Health Score)
+function calculateChapterHealth(startPage, endPage) {
+  if (!graph.annotations || graph.annotations.length === 0) return null;
+  const currentDocUrl = graph.activeDoc ? graph.activeDoc.url : '';
+  const anns = graph.annotations.filter(a => {
+    if (a.docUrl && currentDocUrl && a.docUrl !== currentDocUrl) return false;
+    return a.page >= startPage && a.page <= endPage;
+  });
+  if (anns.length === 0) return null;
+
+  const weights = { understood: 1.0, memorize: 1.0, inspired: 0.8, confused: 0.5, lost: 0.0 };
+  const totalScore = anns.reduce((sum, a) => sum + (weights[a.status] !== undefined ? weights[a.status] : 0.5), 0);
+  const avg = totalScore / anns.length;
+
+  return {
+    score: avg,
+    count: anns.length,
+    understood: anns.filter(a => a.status === 'understood' || a.status === 'memorize').length,
+    confused: anns.filter(a => a.status === 'confused').length,
+    lost: anns.filter(a => a.status === 'lost').length,
+    inspired: anns.filter(a => a.status === 'inspired').length
+  };
+}
+
+// 刷新目录大纲热力图状态
+function refreshOutlineHeatmap() {
+  if (!currentPdfDoc) return;
+  if (currentPdfOutline && currentPdfOutline.length > 0) {
+    assignOutlineEndPages(currentPdfOutline, currentPdfDoc.numPages);
+    renderOutlineTree(currentPdfOutline);
+  } else {
+    renderFallbackOutline(currentPdfDoc.numPages);
   }
 }
 
@@ -1833,9 +1905,27 @@ function renderOutlineTree(outlineItems) {
     if (item.pageNum === currentPdfPageNum) row.classList.add('active');
     row.dataset.page = item.pageNum || '';
 
+    // 计算该章节认知健康度热力指标
+    const endPage = item.endPage || item.pageNum;
+    const health = item.pageNum ? calculateChapterHealth(item.pageNum, endPage) : null;
+    let heatHtml = '';
+    if (health) {
+      const pct = Math.round(health.score * 100);
+      let dotColor = 'yellow';
+      if (health.score >= 0.7) dotColor = 'green';
+      else if (health.score < 0.4) dotColor = 'red';
+      heatHtml = `
+        <span class="outline-heat-badge" title="章节认知健康度 ${pct}% (共 ${health.count} 条批注: ${health.understood}已掌握, ${health.confused}有疑问, ${health.lost}未掌握)">
+          <span class="heat-dot ${dotColor}"></span>
+          <span>${pct}%</span>
+        </span>
+      `;
+    }
+
     row.innerHTML = `
       <span class="outline-item-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span>
       <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+        ${heatHtml}
         ${item.pageNum ? `<button class="outline-item-probe" title="对该章节所在页 (P.${item.pageNum} ± 2) 执行邻域切片研读">探针</button>` : ''}
         ${item.pageNum ? `<span class="outline-page-badge">P.${item.pageNum}</span>` : ''}
       </div>
@@ -1882,14 +1972,30 @@ function renderOutlineTree(outlineItems) {
 function renderFallbackOutline(numPages) {
   const treeContainer = document.getElementById('pdf-outline-tree');
   if (!treeContainer) return;
+  const blocks = Array.from({ length: Math.min(10, Math.ceil(numPages / 10)) }, (_, i) => {
+    const p = i === 0 ? 1 : i * 10;
+    const endP = Math.min(numPages, p + 9);
+    const health = calculateChapterHealth(p, endP);
+    let dotHtml = '';
+    if (health) {
+      let dotColor = 'yellow';
+      if (health.score >= 0.7) dotColor = 'green';
+      else if (health.score < 0.4) dotColor = 'red';
+      dotHtml = `<span class="heat-dot ${dotColor}" title="认知掌握度 ${Math.round(health.score * 100)}% (共 ${health.count} 条批注)"></span>`;
+    }
+    return `
+      <button class="btn" style="padding: 3px 6px; font-size: 11px; justify-content: space-between; align-items: center;" onclick="window.jumpToOutlinePage(${p})">
+        <span>第 ${p} 页</span>
+        ${dotHtml}
+      </button>
+    `;
+  }).join('');
+
   treeContainer.innerHTML = `
     <div style="padding: 10px 8px; color: #94a3b8; font-size: 11.5px; line-height: 1.5;">
       <p style="margin-bottom: 8px; color: #cbd5e1;">该文献未内置书签大纲，可点击上方“AI 骨架”解析或按分页跳转：</p>
       <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;">
-        ${Array.from({ length: Math.min(10, Math.ceil(numPages / 10)) }, (_, i) => {
-          const p = i === 0 ? 1 : i * 10;
-          return `<button class="btn" style="padding: 3px 6px; font-size: 11px; justify-content: center;" onclick="window.jumpToOutlinePage(${p})">第 ${p} 页</button>`;
-        }).join('')}
+        ${blocks}
       </div>
     </div>
   `;
@@ -2180,6 +2286,7 @@ async function buildContinuousScrollLayout() {
       </div>
       <canvas class="pdf-canvas" style="display: none;"></canvas>
       <div class="textLayer" style="display: none;"></div>
+      <div class="annotation-layer" data-page="${p}" style="display: none;"></div>
     `;
 
     fragment.appendChild(slot);
@@ -2225,6 +2332,7 @@ async function buildContinuousScrollLayout() {
 }
 
 function updateCurrentPageOnScroll() {
+  if (isRestoringBreakpoint) return;
   if (!currentPdfDoc || currentDocMode !== 'pdf') return;
   const viewContainer = document.getElementById('pdf-view-container');
   if (!viewContainer) return;
@@ -2321,6 +2429,11 @@ async function renderPageSlot(pageNum) {
     if (placeholder) placeholder.style.display = 'none';
     canvas.style.display = 'block';
     if (textLayer) textLayer.style.display = 'block';
+    const annLayer = slot.querySelector('.annotation-layer');
+    if (annLayer) {
+      annLayer.style.display = 'block';
+      renderAnnotationsForSlot(slot, pageNum);
+    }
 
     item.rendered = true;
   } catch (err) {
@@ -2403,6 +2516,9 @@ function setupPdfControls() {
       const isVisible = outlinePanel.style.display === 'flex';
       outlinePanel.style.display = isVisible ? 'none' : 'flex';
       btnToggleOutline.classList.toggle('active', !isVisible);
+      if (!isVisible) {
+        refreshOutlineHeatmap();
+      }
     };
   }
 
@@ -2487,6 +2603,802 @@ function setupDrawerResizer() {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   };
+}
+
+// ==========================================
+// Phase 1: 教材阅读学习批注系统 (Annotation & Note Bubbles)
+// ==========================================
+
+const ANNOTATION_STATUS_META = {
+  understood: { icon: '✅', label: '已掌握', color: '#10b981' },
+  confused: { icon: '🤔', label: '有疑问', color: '#f59e0b' },
+  lost: { icon: '❌', label: '未掌握', color: '#ef4444' },
+  inspired: { icon: '💡', label: '灵感', color: '#a855f7' },
+  memorize: { icon: '⭐', label: '需精背', color: '#06b6d4' }
+};
+
+let pendingAnnotationSelection = null;
+let currentActiveAnnotation = null;
+let noteDebounceTimer = null;
+let currentAnnJumpIndex = -1;
+let currentAnnFilter = 'all';
+let currentAnnSearchQuery = '';
+let resumeBannerTimer = null;
+
+// 渲染单个页槽内的批注高亮与标记徽章
+function renderAnnotationsForSlot(slot, pageNum) {
+  if (!slot) return;
+  const annLayer = slot.querySelector('.annotation-layer');
+  if (!annLayer) return;
+
+  annLayer.innerHTML = '';
+  if (!graph.annotations || !Array.isArray(graph.annotations)) {
+    graph.annotations = [];
+  }
+
+  const currentDocUrl = graph.activeDoc ? graph.activeDoc.url : '';
+  const pageAnns = graph.annotations.filter(a => {
+    if (a.page !== pageNum) return false;
+    if (a.docUrl && currentDocUrl && a.docUrl !== currentDocUrl) return false;
+    return true;
+  });
+
+  pageAnns.forEach(ann => {
+    const status = ann.status || 'confused';
+    const rects = ann.rects || [];
+
+    // 渲染划线覆盖矩形
+    rects.forEach(r => {
+      const hl = document.createElement('div');
+      hl.className = `pdf-ann-highlight ann-status-${status}`;
+      hl.dataset.annId = ann.id;
+      hl.style.left = `${(r.x * 100).toFixed(2)}%`;
+      hl.style.top = `${(r.y * 100).toFixed(2)}%`;
+      hl.style.width = `${(r.w * 100).toFixed(2)}%`;
+      hl.style.height = `${(r.h * 100).toFixed(2)}%`;
+
+      hl.onclick = (e) => {
+        e.stopPropagation();
+        openNoteBubble(ann, hl);
+      };
+      annLayer.appendChild(hl);
+    });
+
+    // 渲染位于最后一行尾端的气泡便签指示徽章
+    if (rects.length > 0) {
+      const lastRect = rects[rects.length - 1];
+      const badge = document.createElement('div');
+      badge.className = `pdf-ann-badge ann-status-${status}`;
+      badge.dataset.annId = ann.id;
+      
+      const badgeX = Math.min(97, (lastRect.x + lastRect.w) * 100 + 0.6);
+      const badgeY = (lastRect.y + lastRect.h / 2) * 100;
+      badge.style.left = `${badgeX.toFixed(2)}%`;
+      badge.style.top = `${badgeY.toFixed(2)}%`;
+
+      const meta = ANNOTATION_STATUS_META[status] || ANNOTATION_STATUS_META.confused;
+      badge.innerHTML = `
+        <span class="ann-badge-icon">${meta.icon}</span>
+        ${ann.note ? '<span class="ann-badge-has-note" title="包含便签想法">💭</span>' : ''}
+      `;
+
+      badge.onclick = (e) => {
+        e.stopPropagation();
+        openNoteBubble(ann, badge);
+      };
+      annLayer.appendChild(badge);
+    }
+  });
+}
+
+// 刷新指定页面的批注
+function renderAnnotationsForPage(pageNum) {
+  const slot = document.getElementById(`pdf-slot-${pageNum}`);
+  if (slot) {
+    renderAnnotationsForSlot(slot, pageNum);
+  }
+}
+
+// 刷新当前所有已渲染页面的批注
+function renderAllVisibleAnnotations() {
+  if (!pdfSlotsMap) return;
+  pdfSlotsMap.forEach((item, pageNum) => {
+    if (item.rendered && item.slot) {
+      renderAnnotationsForSlot(item.slot, pageNum);
+    }
+  });
+  updateReaderAnnotationCount();
+}
+
+// 更新文献阅读器工具栏及抽屉上的批注数量角标
+function updateReaderAnnotationCount() {
+  const currentDocUrl = graph.activeDoc ? graph.activeDoc.url : '';
+  const list = (graph.annotations || []).filter(a => !a.docUrl || !currentDocUrl || a.docUrl === currentDocUrl);
+  
+  const countEl = document.getElementById('reader-ann-count');
+  if (countEl) countEl.innerText = list.length;
+
+  const totalBadge = document.getElementById('ann-panel-total-badge');
+  if (totalBadge) totalBadge.innerText = list.length;
+
+  const annPanel = document.getElementById('pdf-annotations-panel');
+  if (annPanel && annPanel.style.display === 'flex') {
+    renderAnnotationsSidebar();
+  }
+}
+
+// Phase 2: 显示断点续读引导条
+function showResumeReadingBanner(pageNum) {
+  const banner = document.getElementById('reader-resume-banner');
+  if (!banner) return;
+
+  const currentDocUrl = graph.activeDoc ? graph.activeDoc.url : '';
+  const pageAnns = (graph.annotations || []).filter(a => (!a.docUrl || !currentDocUrl || a.docUrl === currentDocUrl) && a.page === pageNum);
+  const annSuffix = pageAnns.length > 0 ? `（包含 ${pageAnns.length} 条批注）` : '';
+
+  const textEl = document.getElementById('resume-banner-text');
+  if (textEl) {
+    textEl.innerText = `检测到上次阅读进度：第 ${pageNum} 页 ${annSuffix}`;
+  }
+
+  const btnJump = document.getElementById('btn-resume-jump');
+  if (btnJump) {
+    btnJump.onclick = () => {
+      scrollToPage(pageNum, true);
+      banner.style.display = 'none';
+      updateStatus(`📍 已定位至上次阅读断点：第 ${pageNum} 页`);
+    };
+  }
+
+  const btnDismiss = document.getElementById('btn-resume-dismiss');
+  if (btnDismiss) {
+    btnDismiss.onclick = () => {
+      banner.style.display = 'none';
+    };
+  }
+
+  banner.style.display = 'flex';
+
+  if (resumeBannerTimer) clearTimeout(resumeBannerTimer);
+  resumeBannerTimer = setTimeout(() => {
+    if (banner) banner.style.display = 'none';
+  }, 10000);
+}
+
+// Phase 2: 渲染侧边栏批注卡片列表 (支持 6 态过滤与全文搜索)
+function renderAnnotationsSidebar() {
+  const panel = document.getElementById('pdf-annotations-panel');
+  const cardsList = document.getElementById('ann-cards-list');
+  const summaryEl = document.getElementById('ann-filter-summary');
+  const totalBadge = document.getElementById('ann-panel-total-badge');
+  if (!panel || !cardsList) return;
+
+  const currentDocUrl = graph.activeDoc ? graph.activeDoc.url : '';
+  const allAnns = (graph.annotations || []).filter(a => !a.docUrl || !currentDocUrl || a.docUrl === currentDocUrl);
+
+  if (totalBadge) totalBadge.innerText = allAnns.length;
+
+  let filtered = allAnns;
+  if (currentAnnFilter && currentAnnFilter !== 'all') {
+    filtered = filtered.filter(a => a.status === currentAnnFilter);
+  }
+
+  if (currentAnnSearchQuery && currentAnnSearchQuery.trim()) {
+    const q = currentAnnSearchQuery.trim().toLowerCase();
+    filtered = filtered.filter(a => {
+      const textMatch = a.text && a.text.toLowerCase().includes(q);
+      const noteMatch = a.note && a.note.toLowerCase().includes(q);
+      return textMatch || noteMatch;
+    });
+  }
+
+  // 按页码升序排序；同页码按垂直坐标或创建时间排序
+  filtered.sort((a, b) => {
+    if (a.page !== b.page) return a.page - b.page;
+    const yA = (a.rects && a.rects[0]) ? a.rects[0].y : 0;
+    const yB = (b.rects && b.rects[0]) ? b.rects[0].y : 0;
+    return yA - yB;
+  });
+
+  if (summaryEl) {
+    summaryEl.innerText = `筛选出 ${filtered.length} / ${allAnns.length} 条`;
+  }
+
+  if (filtered.length === 0) {
+    cardsList.innerHTML = `
+      <div style="color: #64748b; padding: 28px 12px; text-align: center; font-size: 11.5px; line-height: 1.6;">
+        ${allAnns.length === 0 ? '📝 当前文献暂无学习批注<br><span style="font-size: 10.5px; color: #475569;">划选文本后即可添加批注</span>' : '🔍 无匹配的批注记录'}
+      </div>
+    `;
+    return;
+  }
+
+  cardsList.innerHTML = filtered.map(ann => {
+    const meta = ANNOTATION_STATUS_META[ann.status] || ANNOTATION_STATUS_META.confused;
+    const timeStr = ann.createdAt ? new Date(ann.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    return `
+      <div class="ann-card-item ann-border-${ann.status || 'confused'}" data-ann-id="${ann.id}" data-page="${ann.page}">
+        <div class="ann-card-header">
+          <span class="ann-card-status-chip" style="color: ${meta.color};">
+            <span>${meta.icon}</span>
+            <span>${meta.label}</span>
+          </span>
+          <span class="ann-card-page-badge">第 ${ann.page} 页</span>
+        </div>
+        <div class="ann-card-text" title="${escapeHtml(ann.text || '')}">“${escapeHtml(ann.text || '')}”</div>
+        ${ann.note ? `<div class="ann-card-note" title="${escapeHtml(ann.note)}">💭 ${escapeHtml(ann.note)}</div>` : ''}
+        <div class="ann-card-footer">
+          <span class="ann-card-time">${timeStr}</span>
+          <div class="ann-card-actions">
+            <button class="ann-card-btn btn-card-canvas" title="推入图谱生成节点" data-id="${ann.id}">📌 入图</button>
+            <button class="ann-card-btn btn-card-delete" title="删除批注" data-id="${ann.id}">🗑️</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // 绑定卡片点击平滑定位与呼吸光效高亮
+  cardsList.querySelectorAll('.ann-card-item').forEach(card => {
+    card.onclick = (e) => {
+      if (e.target.closest('.ann-card-actions')) return;
+      const annId = card.dataset.annId;
+      const page = parseInt(card.dataset.page, 10);
+      scrollToPage(page, true);
+      setTimeout(() => {
+        const mark = document.querySelector(`.pdf-ann-highlight[data-ann-id="${annId}"]`);
+        if (mark) {
+          mark.classList.add('flash-highlight');
+          setTimeout(() => mark.classList.remove('flash-highlight'), 1600);
+        }
+        const badge = document.querySelector(`.pdf-ann-badge[data-ann-id="${annId}"]`);
+        if (badge) {
+          badge.classList.add('flash-highlight');
+          setTimeout(() => badge.classList.remove('flash-highlight'), 1600);
+        }
+      }, 400);
+
+      const targetAnn = (graph.annotations || []).find(a => a.id === annId);
+      if (targetAnn) {
+        const meta = ANNOTATION_STATUS_META[targetAnn.status] || ANNOTATION_STATUS_META.confused;
+        updateStatus(`[${meta.icon} ${meta.label}] 已定位至第 ${page} 页批注: “${(targetAnn.text || '').slice(0, 16)}...”`);
+      }
+    };
+  });
+
+  // 绑定“📌 入图”
+  cardsList.querySelectorAll('.btn-card-canvas').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const annId = btn.dataset.id;
+      const ann = (graph.annotations || []).find(a => a.id === annId);
+      if (ann) pushAnnotationToCanvas(ann);
+    };
+  });
+
+  // 绑定“🗑️ 删除”
+  cardsList.querySelectorAll('.btn-card-delete').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const annId = btn.dataset.id;
+      const ann = (graph.annotations || []).find(a => a.id === annId);
+      if (!ann) return;
+      const page = ann.page;
+      graph.annotations = (graph.annotations || []).filter(a => a.id !== annId);
+      debouncedSave();
+      renderAnnotationsForPage(page);
+      updateReaderAnnotationCount();
+      renderAnnotationsSidebar();
+      refreshOutlineHeatmap();
+      updateStatus('🗑️ 已删除该条批注');
+    };
+  });
+}
+
+// 打开批注便签气泡卡片 (Note Bubble)
+function openNoteBubble(ann, anchorEl) {
+  currentActiveAnnotation = ann;
+  const bubble = document.getElementById('reader-note-bubble');
+  if (!bubble) return;
+
+  const quoteEl = document.getElementById('bubble-quote');
+  if (quoteEl) quoteEl.innerText = `“${ann.text || ''}”`;
+
+  const pageBadge = document.getElementById('bubble-page-info');
+  if (pageBadge) pageBadge.innerText = `P.${ann.page || 1}`;
+
+  const noteInput = document.getElementById('bubble-note-input');
+  if (noteInput) noteInput.value = ann.note || '';
+
+  updateBubbleStatusUI(ann.status || 'confused');
+
+  bubble.style.display = 'flex';
+  const anchorRect = anchorEl ? anchorEl.getBoundingClientRect() : { left: window.innerWidth / 2, top: 120, width: 0, height: 0, bottom: 120 };
+  const bubbleWidth = Math.min(340, window.innerWidth - 32);
+  const bubbleHeight = 220;
+
+  let left = anchorRect.left + anchorRect.width / 2 - bubbleWidth / 2;
+  left = Math.max(16, Math.min(window.innerWidth - bubbleWidth - 16, left));
+
+  let top = anchorRect.bottom + 8;
+  if (top + bubbleHeight > window.innerHeight - 20) {
+    top = Math.max(16, anchorRect.top - bubbleHeight - 8);
+  }
+
+  bubble.style.left = `${left}px`;
+  bubble.style.top = `${top}px`;
+
+  setTimeout(() => {
+    if (noteInput) noteInput.focus();
+  }, 40);
+}
+
+// 关闭便签卡片
+function closeNoteBubble() {
+  const bubble = document.getElementById('reader-note-bubble');
+  if (bubble) bubble.style.display = 'none';
+  currentActiveAnnotation = null;
+}
+
+// 更新气泡卡片头部的状态高亮与文字标签
+function updateBubbleStatusUI(status) {
+  const meta = ANNOTATION_STATUS_META[status] || ANNOTATION_STATUS_META.confused;
+  const statusLabel = document.getElementById('bubble-status-label');
+  if (statusLabel) {
+    statusLabel.innerText = meta.label;
+    statusLabel.style.color = meta.color;
+  }
+
+  document.querySelectorAll('.bubble-status-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.status === status);
+  });
+}
+
+// 在批注之间连续跳转与呼吸光效高亮
+function jumpToNextAnnotation() {
+  const currentDocUrl = graph.activeDoc ? graph.activeDoc.url : '';
+  const anns = (graph.annotations || []).filter(a => !a.docUrl || !currentDocUrl || a.docUrl === currentDocUrl);
+  if (anns.length === 0) {
+    updateStatus('💡 当前文献暂无学习批注，可在文字上划词选择添加！');
+    return;
+  }
+
+  currentAnnJumpIndex = (currentAnnJumpIndex + 1) % anns.length;
+  const targetAnn = anns[currentAnnJumpIndex];
+
+  if (currentDocMode === 'pdf') {
+    scrollToPage(targetAnn.page, true);
+    setTimeout(() => {
+      const mark = document.querySelector(`.pdf-ann-highlight[data-ann-id="${targetAnn.id}"]`);
+      if (mark) {
+        mark.classList.add('flash-highlight');
+        setTimeout(() => mark.classList.remove('flash-highlight'), 1600);
+      }
+    }, 450);
+  }
+  const meta = ANNOTATION_STATUS_META[targetAnn.status] || ANNOTATION_STATUS_META.confused;
+  updateStatus(`[${meta.icon} ${meta.label}] 已定位至文献第 ${targetAnn.page} 页批注: “${targetAnn.text.slice(0, 16)}...”`);
+}
+
+// 将批注一键推入图谱生成实证/思考节点
+function pushAnnotationToCanvas(ann) {
+  if (!ann) return;
+  const newId = `n_ann_${Date.now()}`;
+  const isQuestion = ann.status === 'confused' || ann.status === 'lost';
+  const kind = isQuestion ? 'question' : 'material';
+  const meta = ANNOTATION_STATUS_META[ann.status] || ANNOTATION_STATUS_META.confused;
+  const rawTitle = ann.note ? ann.note.slice(0, 18) : (ann.text ? ann.text.slice(0, 18) : '文献批注');
+  const title = `[${meta.icon} ${meta.label}] ${rawTitle}`;
+
+  const newX = 320 + (Math.random() * 80 - 40);
+  const newY = 220 + (Math.random() * 80 - 40);
+
+  const newNode = {
+    id: newId,
+    kind: kind,
+    title: title,
+    excerpt: ann.text || '',
+    question: isQuestion ? (ann.note || ann.text) : '',
+    response: '',
+    status: 'idle',
+    citation: `${ann.docTitle || currentDocTitle} (P.${ann.page || 1})`,
+    x: newX,
+    y: newY
+  };
+
+  graph.nodes.push(newNode);
+
+  if (selectedNodeId && selectedNodeId !== newId) {
+    graph.edges.push({
+      id: `e_${newId}_${selectedNodeId}`,
+      source: newId,
+      target: selectedNodeId,
+      kind: isQuestion ? 'solid' : 'dashed'
+    });
+  }
+
+  saveGraph();
+  renderNodes();
+  requestAnimationFrame(() => renderEdges());
+  selectNode(newId);
+  updateStatus(`✨ 已将批注【${rawTitle}】推入画布生成节点 #${newId}`);
+}
+
+// 初始化划线与批注系统核心事件绑定
+function initReaderAnnotationSystem() {
+  const annToolbar = document.getElementById('reader-annotation-toolbar');
+  const noteBubble = document.getElementById('reader-note-bubble');
+  const btnAnnotations = document.getElementById('btn-reader-annotations');
+  const noteInput = document.getElementById('bubble-note-input');
+  const btnBubbleDelete = document.getElementById('bubble-btn-delete');
+  const btnBubbleClose = document.getElementById('bubble-btn-close');
+  const btnBubbleCanvas = document.getElementById('bubble-btn-canvas');
+
+  // 1. 点击工具栏 5 个认知状态按钮直接建批注
+  document.querySelectorAll('.ann-tool-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const status = btn.dataset.status;
+      createAnnotationFromPending(status, false);
+    };
+  });
+
+  // 2. 点击 "✏️ 写想法"：建立批注并立刻弹出便签卡片聚焦输入
+  const btnWriteNote = document.getElementById('btn-ann-write-note');
+  if (btnWriteNote) {
+    btnWriteNote.onclick = (e) => {
+      e.stopPropagation();
+      createAnnotationFromPending('confused', true);
+    };
+  }
+
+  // 3. 点击 "📌 入图"：直接生成批注并推入画布
+  const btnToCanvas = document.getElementById('btn-ann-to-canvas');
+  if (btnToCanvas) {
+    btnToCanvas.onclick = (e) => {
+      e.stopPropagation();
+      const ann = createAnnotationFromPending('inspired', false);
+      if (ann) pushAnnotationToCanvas(ann);
+    };
+  }
+
+  // 4. 点击 "📋 复制"
+  const btnAnnCopy = document.getElementById('btn-ann-copy');
+  if (btnAnnCopy) {
+    btnAnnCopy.onclick = async (e) => {
+      e.stopPropagation();
+      if (!pendingAnnotationSelection) return;
+      const text = pendingAnnotationSelection.text;
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        updateStatus(`已复制划选内容 (${text.length} 字)`);
+      } catch (err) {
+        console.warn("复制异常:", err);
+      }
+      if (annToolbar) annToolbar.style.display = 'none';
+      window.getSelection()?.removeAllRanges();
+    };
+  }
+
+  // 5. 便签卡片状态切换
+  document.querySelectorAll('.bubble-status-pill').forEach(pill => {
+    pill.onclick = (e) => {
+      e.stopPropagation();
+      if (!currentActiveAnnotation) return;
+      const newStatus = pill.dataset.status;
+      currentActiveAnnotation.status = newStatus;
+      currentActiveAnnotation.updatedAt = new Date().toISOString();
+      updateBubbleStatusUI(newStatus);
+      debouncedSave();
+      renderAnnotationsForPage(currentActiveAnnotation.page);
+      renderAnnotationsSidebar();
+      refreshOutlineHeatmap();
+      const meta = ANNOTATION_STATUS_META[newStatus];
+      updateStatus(`批注状态已更新为: ${meta.icon} ${meta.label}`);
+    };
+  });
+
+  // 6. 便签输入框无感自动存盘
+  if (noteInput) {
+    noteInput.oninput = () => {
+      if (!currentActiveAnnotation) return;
+      const annotationId = currentActiveAnnotation.id;
+      const annotation = (graph.annotations || []).find(a => a.id === annotationId);
+      if (!annotation) return;
+      currentActiveAnnotation = annotation;
+      annotation.note = noteInput.value;
+      annotation.updatedAt = new Date().toISOString();
+      const annotationSessionId = currentSessionId;
+
+      const saveStatus = document.getElementById('bubble-save-status');
+      if (saveStatus) saveStatus.innerText = '正在保存...';
+
+      clearTimeout(noteDebounceTimer);
+      noteDebounceTimer = setTimeout(() => {
+        if (currentSessionId !== annotationSessionId) return;
+        const annotation = (graph.annotations || []).find(a => a.id === annotationId);
+        if (!annotation) return;
+        debouncedSave();
+        if (saveStatus && currentActiveAnnotation?.id === annotationId) {
+          saveStatus.innerText = '已自动保存';
+        }
+        renderAnnotationsForPage(annotation.page);
+        renderAnnotationsSidebar();
+      }, 400);
+    };
+  }
+
+  // 7. 删除批注
+  if (btnBubbleDelete) {
+    btnBubbleDelete.onclick = (e) => {
+      e.stopPropagation();
+      if (!currentActiveAnnotation) return;
+      const id = currentActiveAnnotation.id;
+      const page = currentActiveAnnotation.page;
+      graph.annotations = (graph.annotations || []).filter(a => a.id !== id);
+      debouncedSave();
+      renderAnnotationsForPage(page);
+      updateReaderAnnotationCount();
+      renderAnnotationsSidebar();
+      refreshOutlineHeatmap();
+      closeNoteBubble();
+      updateStatus('🗑️ 已删除该条批注');
+    };
+  }
+
+  // 8. 关闭便签
+  if (btnBubbleClose) {
+    btnBubbleClose.onclick = (e) => {
+      e.stopPropagation();
+      closeNoteBubble();
+    };
+  }
+
+  // 9. 便签推入画布
+  if (btnBubbleCanvas) {
+    btnBubbleCanvas.onclick = (e) => {
+      e.stopPropagation();
+      if (currentActiveAnnotation) {
+        pushAnnotationToCanvas(currentActiveAnnotation);
+      }
+    };
+  }
+
+  // 10. 批注抽屉侧边栏切换与控制器绑定 (Phase 2)
+  const annPanel = document.getElementById('pdf-annotations-panel');
+  const btnCloseAnnPanel = document.getElementById('btn-close-ann-panel');
+  const annSearchInput = document.getElementById('ann-search-input');
+  const btnAnnJumpNext = document.getElementById('btn-ann-jump-next');
+
+  if (btnAnnotations && annPanel) {
+    btnAnnotations.onclick = () => {
+      const isVisible = annPanel.style.display === 'flex';
+      annPanel.style.display = isVisible ? 'none' : 'flex';
+      btnAnnotations.classList.toggle('active', !isVisible);
+      if (!isVisible) {
+        renderAnnotationsSidebar();
+      }
+    };
+  }
+
+  if (btnCloseAnnPanel && annPanel) {
+    btnCloseAnnPanel.onclick = () => {
+      annPanel.style.display = 'none';
+      if (btnAnnotations) btnAnnotations.classList.remove('active');
+    };
+  }
+
+  if (annSearchInput) {
+    annSearchInput.oninput = () => {
+      currentAnnSearchQuery = annSearchInput.value;
+      renderAnnotationsSidebar();
+    };
+  }
+
+  document.querySelectorAll('.ann-filter-pill').forEach(pill => {
+    pill.onclick = () => {
+      document.querySelectorAll('.ann-filter-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      currentAnnFilter = pill.dataset.filter || 'all';
+      renderAnnotationsSidebar();
+    };
+  });
+
+  if (btnAnnJumpNext) {
+    btnAnnJumpNext.onclick = () => {
+      jumpToNextAnnotation();
+    };
+  }
+
+  // 11. 全局点击空白隐藏工具条与便签
+  document.addEventListener('mousedown', (e) => {
+    if (annToolbar && annToolbar.style.display !== 'none') {
+      if (!annToolbar.contains(e.target)) {
+        annToolbar.style.display = 'none';
+      }
+    }
+    if (noteBubble && noteBubble.style.display !== 'none') {
+      if (!noteBubble.contains(e.target) && !e.target.closest('.pdf-ann-highlight') && !e.target.closest('.pdf-ann-badge')) {
+        closeNoteBubble();
+      }
+    }
+  });
+
+  // 12. 滚动时自动隐藏浮动工具条
+  const pdfViewContainer = document.getElementById('pdf-view-container');
+  if (pdfViewContainer) {
+    pdfViewContainer.addEventListener('scroll', () => {
+      if (annToolbar && annToolbar.style.display !== 'none') {
+        annToolbar.style.display = 'none';
+      }
+    }, { passive: true });
+  }
+
+  // 13. Esc 快捷键关闭便签与工具条
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (annToolbar) annToolbar.style.display = 'none';
+      closeNoteBubble();
+    }
+  });
+}
+
+// 根据当前 pending 选区创建新批注对象并渲染
+function createAnnotationFromPending(status = 'confused', openBubble = false) {
+  if (!pendingAnnotationSelection) return null;
+  const p = pendingAnnotationSelection;
+  if (!graph.annotations) graph.annotations = [];
+
+  const newAnn = {
+    id: `ann_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    docUrl: graph.activeDoc ? graph.activeDoc.url : '',
+    docTitle: currentDocTitle || '',
+    page: p.pageNum,
+    text: p.text,
+    note: '',
+    status: status,
+    rects: p.rects,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  graph.annotations.push(newAnn);
+  debouncedSave();
+  renderAnnotationsForSlot(p.slot, p.pageNum);
+  updateReaderAnnotationCount();
+  renderAnnotationsSidebar();
+  refreshOutlineHeatmap();
+
+  const annToolbar = document.getElementById('reader-annotation-toolbar');
+  if (annToolbar) annToolbar.style.display = 'none';
+  window.getSelection()?.removeAllRanges();
+
+  const meta = ANNOTATION_STATUS_META[status] || ANNOTATION_STATUS_META.confused;
+  updateStatus(`[${meta.icon} ${meta.label}] 已为第 ${p.pageNum} 页添加学习批注`);
+
+  if (openBubble) {
+    const badge = p.slot.querySelector(`.pdf-ann-badge[data-ann-id="${newAnn.id}"]`);
+    openNoteBubble(newAnn, badge || p.slot);
+  }
+
+  pendingAnnotationSelection = null;
+  return newAnn;
+}
+
+// 捕获 PDF / 文献划词并定位浮动工具栏
+function handlePdfTextSelection(e) {
+  const annToolbar = document.getElementById('reader-annotation-toolbar');
+  const noteBubble = document.getElementById('reader-note-bubble');
+  if (annToolbar && annToolbar.contains(e.target)) return;
+  if (noteBubble && noteBubble.contains(e.target)) return;
+
+  setTimeout(() => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      if (annToolbar) annToolbar.style.display = 'none';
+      return;
+    }
+
+    const text = selection.toString().trim();
+    if (text.length < 2) {
+      if (annToolbar) annToolbar.style.display = 'none';
+      return;
+    }
+
+    let anchorNode = selection.anchorNode;
+    let nodeEl = anchorNode ? (anchorNode.nodeType === 1 ? anchorNode : anchorNode.parentElement) : null;
+    let slot = nodeEl ? nodeEl.closest('.pdf-page-slot') : null;
+
+    if (!slot) {
+      try {
+        const range = selection.getRangeAt(0);
+        const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+        slot = startEl.closest('.pdf-page-slot');
+      } catch (err) {}
+    }
+
+    const mdContainer = nodeEl ? nodeEl.closest('#paper-content') : null;
+    if (!slot && !mdContainer) {
+      if (annToolbar) annToolbar.style.display = 'none';
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const boundRect = range.getBoundingClientRect();
+    if (boundRect.width === 0 && boundRect.height === 0) {
+      if (annToolbar) annToolbar.style.display = 'none';
+      return;
+    }
+
+    if (slot) {
+      const pageNum = parseInt(slot.dataset.page, 10) || currentPdfPageNum;
+      const clientRects = range.getClientRects();
+      const slotRect = slot.getBoundingClientRect();
+
+      const normalizedRects = [];
+      for (let i = 0; i < clientRects.length; i++) {
+        const cr = clientRects[i];
+        if (cr.width > 2 && cr.height > 2) {
+          normalizedRects.push({
+            x: Math.max(0, (cr.left - slotRect.left) / slotRect.width),
+            y: Math.max(0, (cr.top - slotRect.top) / slotRect.height),
+            w: Math.min(1, cr.width / slotRect.width),
+            h: Math.min(1, cr.height / slotRect.height)
+          });
+        }
+      }
+
+      if (normalizedRects.length === 0) {
+        if (annToolbar) annToolbar.style.display = 'none';
+        return;
+      }
+
+      pendingAnnotationSelection = {
+        pageNum,
+        slot,
+        text,
+        rects: normalizedRects
+      };
+    } else {
+      pendingAnnotationSelection = {
+        pageNum: 1,
+        slot: mdContainer,
+        text,
+        rects: [{ x: 0.05, y: 0.05, w: 0.9, h: 0.05 }]
+      };
+    }
+
+    showReaderAnnotationToolbar(boundRect);
+  }, 40);
+}
+
+function showReaderAnnotationToolbar(rect) {
+  const toolbar = document.getElementById('reader-annotation-toolbar');
+  if (!toolbar) return;
+
+  toolbar.style.display = 'flex';
+  const tbWidth = 460;
+  const tbHeight = 44;
+
+  let left = rect.left + rect.width / 2 - tbWidth / 2;
+  left = Math.max(16, Math.min(window.innerWidth - tbWidth - 16, left));
+
+  let top = rect.top - tbHeight - 10;
+  if (top < 10) {
+    top = rect.bottom + 10;
+  }
+
+  toolbar.style.left = `${left}px`;
+  toolbar.style.top = `${top}px`;
 }
 
 // 划词摘录
@@ -2771,8 +3683,8 @@ async function transcribeFormula(nodeOrId, imageUrl, citation) {
         targetNode.ocrStatus = 'failed';
         saveGraph();
         renderNodes();
-        if (selectedNodeId === nodeId) updateContextInspector();
         updateStatus(`公式反编译未完成: ${data.error || '未能识别有效内容'}`);
+        showEngineDiagnosticModal(data);
       }
     }
   } catch (err) {
@@ -2785,6 +3697,17 @@ async function transcribeFormula(nodeOrId, imageUrl, citation) {
       if (selectedNodeId === nodeId) updateContextInspector();
     }
     updateStatus(`网络连接或调用异常: ${err.message}`);
+    showEngineDiagnosticModal({
+      ok: false,
+      error_type: 'network_error',
+      error: `视觉多模态接口网络请求异常: ${err.message}`,
+      api_base: currentConfig.api_base,
+      model: currentConfig.vision_model || currentConfig.model,
+      diagnostics: [
+        "请检查当前服务商是否支持多模态视觉模型",
+        "可前往【⚙️ 引擎配置】选择【Qwen2.5-VL-72B】或【Gemini 3.8 Flash】视觉引擎"
+      ]
+    });
   }
 }
 
@@ -2932,6 +3855,8 @@ async function switchSession(sessionId) {
       await restoreSessionActiveDoc();
       selectedNodeId = null;
       renderNodes();
+      updateReaderAnnotationCount();
+      renderAllVisibleAnnotations();
       requestAnimationFrame(() => {
         renderEdges();
         fitView();
@@ -3561,6 +4486,25 @@ function setupEventListeners() {
         { id: '', name: '自动回退 (DeepSeek 官方无多模态，由主引擎/本地代理处理)' }
       ]
     },
+    custom_proxy: {
+      name: '中转反代',
+      api_base: 'https://api.openai-proxy.org/v1',
+      model: 'deepseek-chat',
+      vision_model: 'gpt-4o',
+      hint: '服务商：自定义反代/中转站 · 支持任意 OpenAI 兼容云端中转 API',
+      linkText: '反代配置指南 ↗',
+      linkUrl: 'https://github.com/Shengxuan2513/AxiomFlow',
+      defaultKey: '',
+      models: [
+        { id: 'deepseek-chat', name: 'deepseek-chat (通用推理)' },
+        { id: 'deepseek-reasoner', name: 'deepseek-reasoner (深度长思考)' },
+        { id: 'gpt-4o', name: 'gpt-4o (OpenAI 旗舰)' },
+        { id: 'claude-3-5-sonnet-20241022', name: 'claude-3-5-sonnet (Claude 架构)' }
+      ],
+      vision_models: [
+        { id: 'gpt-4o', name: 'gpt-4o (视觉 OCR)' }
+      ]
+    },
     openai: {
       name: 'OpenAI 官方',
       api_base: 'https://api.openai.com/v1',
@@ -3705,20 +4649,131 @@ function setupEventListeners() {
     if (hintLink) {
       hintLink.innerText = preset.linkText;
       hintLink.href = preset.linkUrl;
-      hintLink.style.display = preset.linkUrl === '#' ? 'none' : 'inline-flex';
+      hintLink.style.display = preset.linkUrl === '#' || !preset.linkUrl ? 'none' : 'inline-flex';
     }
     if (keyStatus) {
-      if (pKey === 'localproxy') {
-        keyStatus.innerText = '免配 Key (自动就绪)';
-        keyStatus.style.color = '#38bdf8';
+      const savedKeys = getSavedProviderKeys();
+      const currentInputKey = (document.getElementById('cfg-api-key')?.value || '').trim();
+      const hasKey = !!(savedKeys[pKey] || currentInputKey || (currentConfig.api_key && currentConfig.api_base?.includes(pKey)));
+      keyStatus.innerText = hasKey ? '已记忆本地私钥 ✓' : '请粘贴 Key';
+      keyStatus.style.color = hasKey ? '#10b981' : '#f59e0b';
+    }
+  }
+
+  // 客户端 URL 自动规范化
+  function sanitizeClientApiBase(url) {
+    if (!url) return '';
+    let clean = url.trim();
+    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+      if (clean.includes('127.0.0.1') || clean.includes('localhost')) {
+        clean = 'http://' + clean;
       } else {
-        const savedKeys = getSavedProviderKeys();
-        const currentInputKey = (document.getElementById('cfg-api-key')?.value || '').trim();
-        const hasKey = !!(savedKeys[pKey] || currentInputKey || (currentConfig.api_key && currentConfig.api_base?.includes(pKey)));
-        keyStatus.innerText = hasKey ? '已记忆本地私钥' : '请粘贴 Key';
-        keyStatus.style.color = hasKey ? '#10b981' : '#f59e0b';
+        clean = 'https://' + clean;
       }
     }
+    clean = clean.replace(/\/chat\/completions\/?$/, '');
+    clean = clean.replace(/\/models\/?$/, '');
+    clean = clean.replace(/\/+$/, '');
+    try {
+      const u = new URL(clean);
+      if (u.pathname === '' || u.pathname === '/') {
+        clean = clean + '/v1';
+      }
+    } catch(e) {}
+    return clean;
+  }
+
+  // 引擎连接异常与自愈诊断弹窗
+  window.showEngineDiagnosticModal = (diagData = {}) => {
+    const modal = document.getElementById('engine-diag-modal');
+    if (!modal) {
+      alert(diagData.error || '大模型请求异常');
+      return;
+    }
+    
+    const titleEl = document.getElementById('diag-modal-title');
+    const summaryEl = document.getElementById('diag-error-summary');
+    const apiBaseEl = document.getElementById('diag-current-api-base');
+    const modelEl = document.getElementById('diag-current-model');
+    const listEl = document.getElementById('diag-suggestions-list');
+    
+    const errorMsg = diagData.error || '无法与大模型服务商或反代建立有效连接';
+    const apiBase = diagData.api_base || currentConfig.api_base || '未设置';
+    const model = diagData.model || currentConfig.model || '未指定';
+    const diagnostics = diagData.diagnostics || [];
+    
+    if (titleEl) {
+      if (diagData.error_type === 'connection_refused') {
+        titleEl.innerText = '🔧 反代或本地服务连接被拒绝 (10061)';
+      } else if (diagData.error_type === 'auth_failed') {
+        titleEl.innerText = '🔑 API Key 认证失败 (401)';
+      } else if (diagData.error_type === 'model_not_found') {
+        titleEl.innerText = '🔍 模型未找到或反代未路由 (404)';
+      } else if (diagData.error_type === 'timeout') {
+        titleEl.innerText = '⏱️ 反代服务器响应超时';
+      } else {
+        titleEl.innerText = '⚠️ 大模型推演引擎连接异常';
+      }
+    }
+    
+    if (summaryEl) {
+      summaryEl.innerHTML = `<strong>⚠️ 异常信息：</strong>${errorMsg}`;
+    }
+    
+    if (apiBaseEl) apiBaseEl.innerText = apiBase;
+    if (modelEl) modelEl.innerText = model;
+    
+    if (listEl) {
+      listEl.innerHTML = '';
+      const items = diagnostics.length > 0 ? diagnostics : [
+        '请检查右上角【⚙️ 引擎配置】中的 API Base 接口地址与 API Key 是否正确；',
+        '若使用在线反代/中转站，请核对地址（如 https://api.xxx.com/v1）并确保带上 /v1；',
+        '若使用本地 OneAPI / 代理软件，请确认本地服务已启动且端口号一致。'
+      ];
+      items.forEach(d => {
+        const li = document.createElement('li');
+        li.style.marginBottom = '4px';
+        li.innerText = d;
+        listEl.appendChild(li);
+      });
+    }
+    
+    modal.style.display = 'flex';
+  };
+
+  window.closeEngineDiagnosticModal = () => {
+    const modal = document.getElementById('engine-diag-modal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  // 绑定诊断弹窗按钮事件
+  const btnCloseDiag = document.getElementById('btn-close-diag-modal');
+  const btnDiagClose = document.getElementById('btn-diag-close');
+  const btnDiagOpenConfig = document.getElementById('btn-diag-open-config');
+  const btnDiagQuickSilicon = document.getElementById('btn-diag-quick-siliconflow');
+
+  if (btnCloseDiag) btnCloseDiag.onclick = window.closeEngineDiagnosticModal;
+  if (btnDiagClose) btnDiagClose.onclick = window.closeEngineDiagnosticModal;
+  if (btnDiagOpenConfig) {
+    btnDiagOpenConfig.onclick = () => {
+      window.closeEngineDiagnosticModal();
+      openSettingsHandler();
+      setTimeout(() => {
+        const baseInput = document.getElementById('cfg-api-base');
+        if (baseInput) {
+          baseInput.focus();
+          baseInput.select();
+        }
+      }, 100);
+    };
+  }
+  if (btnDiagQuickSilicon) {
+    btnDiagQuickSilicon.onclick = () => {
+      window.closeEngineDiagnosticModal();
+      openSettingsHandler();
+      const sBtn = document.querySelector('.btn-preset-provider[data-provider="siliconflow"]');
+      if (sBtn) sBtn.click();
+    };
   }
 
   // 服务商快捷预设按钮点击
@@ -3737,8 +4792,8 @@ function setupEventListeners() {
       if (apiKeyInput) {
         if (savedKeys[pKey]) {
           apiKeyInput.value = savedKeys[pKey];
-        } else if (pKey === 'localproxy') {
-          apiKeyInput.value = 'sk-antigravity';
+        } else if (preset.defaultKey) {
+          apiKeyInput.value = preset.defaultKey;
         } else {
           apiKeyInput.value = '';
         }
@@ -3755,6 +4810,18 @@ function setupEventListeners() {
       updateProviderHintBar(pKey);
     };
   });
+
+  // API Base 输入框失焦时自动规范化
+  const cfgApiBaseInput = document.getElementById('cfg-api-base');
+  if (cfgApiBaseInput) {
+    cfgApiBaseInput.onblur = () => {
+      const sanitized = sanitizeClientApiBase(cfgApiBaseInput.value);
+      if (sanitized && sanitized !== cfgApiBaseInput.value) {
+        cfgApiBaseInput.value = sanitized;
+      }
+      updatePresetButtonsState(cfgApiBaseInput.value);
+    };
+  }
 
   // 主模型下拉选择与自定义输入框联动
   const modelSelectEl = document.getElementById('cfg-model-select');
@@ -3926,8 +4993,8 @@ function setupEventListeners() {
         apiKeyInput.value = savedKeys[matchedPKey];
       } else if (currentConfig.api_key && currentConfig.api_key !== 'sk-antigravity') {
         apiKeyInput.value = currentConfig.api_key;
-      } else if (matchedPKey === 'localproxy') {
-        apiKeyInput.value = 'sk-antigravity';
+      } else if (PROVIDER_PRESETS[matchedPKey]?.defaultKey) {
+        apiKeyInput.value = PROVIDER_PRESETS[matchedPKey].defaultKey;
       } else {
         apiKeyInput.value = '';
       }
