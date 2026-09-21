@@ -179,8 +179,54 @@
           </div>
         </aside>
 
+        <!-- 左侧学习批注清单抽屉面板 -->
+        <aside id="pdf-annotations-panel" class="pdf-annotations-panel" style="display: none; width: 280px; min-width: 240px; max-width: 360px; background: rgba(15, 23, 42, 0.95); border: 1px solid var(--border-color); border-radius: 6px; flex-direction: column; overflow: hidden; font-size: 12px; z-index: 40; flex-shrink: 0;">
+          <div class="ann-panel-header">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.2);">
+              <span style="font-weight: 600; color: #f1f5f9; display: flex; align-items: center; gap: 6px; font-size: 12px;">
+                <span>📝 学习批注手记</span>
+                <span id="ann-panel-total-badge" class="ann-count-badge">0</span>
+              </span>
+              <button id="btn-close-ann-panel" class="btn" style="padding: 1px 6px; font-size: 11px;" title="收起批注列表">✕</button>
+            </div>
+            <!-- 搜索框 -->
+            <div style="padding: 6px 8px; border-bottom: 1px solid var(--border-color);">
+              <input id="ann-search-input" type="text" class="ann-search-box" placeholder="🔍 搜索批注文字或想法便签...">
+            </div>
+            <!-- 6态过滤器胶囊 -->
+            <div class="ann-filter-bar">
+              <button class="ann-filter-pill active" data-filter="all">全部</button>
+              <button class="ann-filter-pill" data-filter="understood">✅ 掌握</button>
+              <button class="ann-filter-pill" data-filter="confused">🤔 疑问</button>
+              <button class="ann-filter-pill" data-filter="lost">❌ 盲区</button>
+              <button class="ann-filter-pill" data-filter="inspired">💡 灵感</button>
+              <button class="ann-filter-pill" data-filter="memorize">⭐ 重点</button>
+            </div>
+          </div>
+          <!-- 批注卡片滚动容器 -->
+          <div id="ann-cards-list" class="ann-cards-list">
+            <!-- 动态注入批注卡片 -->
+          </div>
+          <!-- 底部汇总统计 -->
+          <div class="ann-panel-footer">
+            <span id="ann-filter-summary">共 0 条批注</span>
+            <button id="btn-ann-jump-next" class="btn btn-xs" title="定位到下一条批注">⏭️ 轮转定位</button>
+          </div>
+        </aside>
+
         <!-- 右侧 PDF 原生连续垂直滚动视图 (支持公式/插图秒级渲染与高精度截框) -->
         <div id="pdf-view-container" style="flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; background: #0b0f19; border-radius: 6px; border: 1px solid var(--border-color); text-align: center; padding: 14px 0; scroll-behavior: smooth;">
+          <!-- 续读引导通知条 -->
+          <div id="reader-resume-banner" class="reader-resume-banner" style="display: none;">
+            <div class="resume-banner-content">
+              <span class="resume-icon">📍</span>
+              <span id="resume-banner-text">检测到上次阅读进度：第 1 页</span>
+            </div>
+            <div class="resume-banner-actions">
+              <button id="btn-resume-jump" class="btn btn-xs btn-primary">恢复阅读</button>
+              <button id="btn-resume-dismiss" class="btn btn-xs">✕</button>
+            </div>
+          </div>
           <div id="pdf-continuous-scroll" style="display: block; position: relative; margin: 0 auto; text-align: center; width: 100%;">
             <!-- 动态按需渲染所有连续页 -->
           </div>

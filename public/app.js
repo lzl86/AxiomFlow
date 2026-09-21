@@ -1306,6 +1306,11 @@ async function loadPdfDocument(source, docTitle, savedState = null) {
       setTimeout(() => { isRestoringBreakpoint = false; }, 350);
     }
 
+    // Phase 2: 续读断点与批注引导
+    if (savedState && savedState.currentPage > 1) {
+      showResumeReadingBanner(savedState.currentPage);
+    }
+
     // 异步加载并解析 PDF 章节目录大纲
     loadPdfOutline(currentPdfDoc);
 
@@ -1325,15 +1330,72 @@ async function loadPdfOutline(doc) {
   try {
     const rawOutline = await doc.getOutline();
     if (!rawOutline || rawOutline.length === 0) {
+      currentPdfOutline = [];
       renderFallbackOutline(doc.numPages);
       return;
     }
 
     currentPdfOutline = await resolveOutlineDestinations(doc, rawOutline);
+    assignOutlineEndPages(currentPdfOutline, doc.numPages);
     renderOutlineTree(currentPdfOutline);
   } catch (err) {
     console.warn("解析 PDF 目录大纲失败:", err);
+    currentPdfOutline = [];
     renderFallbackOutline(doc.numPages);
+  }
+}
+
+// 递归计算每个大纲条目的终止页码范围
+function assignOutlineEndPages(items, totalPages) {
+  const flat = [];
+  function walk(list) {
+    list.forEach(it => {
+      if (it.pageNum) flat.push(it);
+      if (it.items && it.items.length > 0) walk(it.items);
+    });
+  }
+  walk(items);
+  flat.sort((a, b) => a.pageNum - b.pageNum);
+
+  for (let i = 0; i < flat.length; i++) {
+    const current = flat[i];
+    const next = flat.slice(i + 1).find(it => it.pageNum > current.pageNum);
+    current.endPage = next ? Math.max(current.pageNum, next.pageNum - 1) : totalPages;
+  }
+}
+
+// 计算指定页码范围内的认知健康度指标 (Heatmap Health Score)
+function calculateChapterHealth(startPage, endPage) {
+  if (!graph.annotations || graph.annotations.length === 0) return null;
+  const currentDocUrl = graph.activeDoc ? graph.activeDoc.url : '';
+  const anns = graph.annotations.filter(a => {
+    if (a.docUrl && currentDocUrl && a.docUrl !== currentDocUrl) return false;
+    return a.page >= startPage && a.page <= endPage;
+  });
+  if (anns.length === 0) return null;
+
+  const weights = { understood: 1.0, memorize: 1.0, inspired: 0.8, confused: 0.5, lost: 0.0 };
+  const totalScore = anns.reduce((sum, a) => sum + (weights[a.status] !== undefined ? weights[a.status] : 0.5), 0);
+  const avg = totalScore / anns.length;
+
+  return {
+    score: avg,
+    count: anns.length,
+    understood: anns.filter(a => a.status === 'understood' || a.status === 'memorize').length,
+    confused: anns.filter(a => a.status === 'confused').length,
+    lost: anns.filter(a => a.status === 'lost').length,
+    inspired: anns.filter(a => a.status === 'inspired').length
+  };
+}
+
+// 刷新目录大纲热力图状态
+function refreshOutlineHeatmap() {
+  if (!currentPdfDoc) return;
+  if (currentPdfOutline && currentPdfOutline.length > 0) {
+    assignOutlineEndPages(currentPdfOutline, currentPdfDoc.numPages);
+    renderOutlineTree(currentPdfOutline);
+  } else {
+    renderFallbackOutline(currentPdfDoc.numPages);
   }
 }
 
@@ -1387,8 +1449,26 @@ function renderOutlineTree(outlineItems) {
     if (item.pageNum === currentPdfPageNum) row.classList.add('active');
     row.dataset.page = item.pageNum || '';
 
+    // 计算该章节认知健康度热力指标
+    const endPage = item.endPage || item.pageNum;
+    const health = item.pageNum ? calculateChapterHealth(item.pageNum, endPage) : null;
+    let heatHtml = '';
+    if (health) {
+      const pct = Math.round(health.score * 100);
+      let dotColor = 'yellow';
+      if (health.score >= 0.7) dotColor = 'green';
+      else if (health.score < 0.4) dotColor = 'red';
+      heatHtml = `
+        <span class="outline-heat-badge" title="章节认知健康度 ${pct}% (共 ${health.count} 条批注: ${health.understood}已掌握, ${health.confused}有疑问, ${health.lost}未掌握)">
+          <span class="heat-dot ${dotColor}"></span>
+          <span>${pct}%</span>
+        </span>
+      `;
+    }
+
     row.innerHTML = `
       <span class="outline-item-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span>
+      ${heatHtml}
       ${item.pageNum ? `<span class="outline-page-badge">P.${item.pageNum}</span>` : ''}
     `;
 
@@ -1425,14 +1505,30 @@ function renderOutlineTree(outlineItems) {
 function renderFallbackOutline(numPages) {
   const treeContainer = document.getElementById('pdf-outline-tree');
   if (!treeContainer) return;
+  const blocks = Array.from({ length: Math.min(10, Math.ceil(numPages / 10)) }, (_, i) => {
+    const p = i === 0 ? 1 : i * 10;
+    const endP = Math.min(numPages, p + 9);
+    const health = calculateChapterHealth(p, endP);
+    let dotHtml = '';
+    if (health) {
+      let dotColor = 'yellow';
+      if (health.score >= 0.7) dotColor = 'green';
+      else if (health.score < 0.4) dotColor = 'red';
+      dotHtml = `<span class="heat-dot ${dotColor}" title="认知掌握度 ${Math.round(health.score * 100)}% (共 ${health.count} 条批注)"></span>`;
+    }
+    return `
+      <button class="btn" style="padding: 3px 6px; font-size: 11px; justify-content: space-between; align-items: center;" onclick="window.jumpToOutlinePage(${p})">
+        <span>第 ${p} 页</span>
+        ${dotHtml}
+      </button>
+    `;
+  }).join('');
+
   treeContainer.innerHTML = `
     <div style="padding: 10px 8px; color: #94a3b8; font-size: 11.5px; line-height: 1.5;">
       <p style="margin-bottom: 8px; color: #cbd5e1;">⚠️ 该 PDF 未内置书签大纲，可通过以下常用分页快速跳转：</p>
       <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;">
-        ${Array.from({ length: Math.min(10, Math.ceil(numPages / 10)) }, (_, i) => {
-          const p = i === 0 ? 1 : i * 10;
-          return `<button class="btn" style="padding: 3px 6px; font-size: 11px; justify-content: center;" onclick="window.jumpToOutlinePage(${p})">第 ${p} 页</button>`;
-        }).join('')}
+        ${blocks}
       </div>
     </div>
   `;
@@ -1733,6 +1829,9 @@ function setupPdfControls() {
       const isVisible = outlinePanel.style.display === 'flex';
       outlinePanel.style.display = isVisible ? 'none' : 'flex';
       btnToggleOutline.classList.toggle('active', !isVisible);
+      if (!isVisible) {
+        refreshOutlineHeatmap();
+      }
     };
   }
 
@@ -1833,6 +1932,9 @@ let pendingAnnotationSelection = null;
 let currentActiveAnnotation = null;
 let noteDebounceTimer = null;
 let currentAnnJumpIndex = -1;
+let currentAnnFilter = 'all';
+let currentAnnSearchQuery = '';
+let resumeBannerTimer = null;
 
 // 渲染单个页槽内的批注高亮与标记徽章
 function renderAnnotationsForSlot(slot, pageNum) {
@@ -1919,13 +2021,189 @@ function renderAllVisibleAnnotations() {
   updateReaderAnnotationCount();
 }
 
-// 更新文献阅读器工具栏上的批注数量角标
+// 更新文献阅读器工具栏及抽屉上的批注数量角标
 function updateReaderAnnotationCount() {
-  const countEl = document.getElementById('reader-ann-count');
-  if (!countEl) return;
   const currentDocUrl = graph.activeDoc ? graph.activeDoc.url : '';
   const list = (graph.annotations || []).filter(a => !a.docUrl || !currentDocUrl || a.docUrl === currentDocUrl);
-  countEl.innerText = list.length;
+  
+  const countEl = document.getElementById('reader-ann-count');
+  if (countEl) countEl.innerText = list.length;
+
+  const totalBadge = document.getElementById('ann-panel-total-badge');
+  if (totalBadge) totalBadge.innerText = list.length;
+
+  const annPanel = document.getElementById('pdf-annotations-panel');
+  if (annPanel && annPanel.style.display === 'flex') {
+    renderAnnotationsSidebar();
+  }
+}
+
+// Phase 2: 显示断点续读引导条
+function showResumeReadingBanner(pageNum) {
+  const banner = document.getElementById('reader-resume-banner');
+  if (!banner) return;
+
+  const currentDocUrl = graph.activeDoc ? graph.activeDoc.url : '';
+  const pageAnns = (graph.annotations || []).filter(a => (!a.docUrl || !currentDocUrl || a.docUrl === currentDocUrl) && a.page === pageNum);
+  const annSuffix = pageAnns.length > 0 ? `（包含 ${pageAnns.length} 条批注）` : '';
+
+  const textEl = document.getElementById('resume-banner-text');
+  if (textEl) {
+    textEl.innerText = `检测到上次阅读进度：第 ${pageNum} 页 ${annSuffix}`;
+  }
+
+  const btnJump = document.getElementById('btn-resume-jump');
+  if (btnJump) {
+    btnJump.onclick = () => {
+      scrollToPage(pageNum, true);
+      banner.style.display = 'none';
+      updateStatus(`📍 已定位至上次阅读断点：第 ${pageNum} 页`);
+    };
+  }
+
+  const btnDismiss = document.getElementById('btn-resume-dismiss');
+  if (btnDismiss) {
+    btnDismiss.onclick = () => {
+      banner.style.display = 'none';
+    };
+  }
+
+  banner.style.display = 'flex';
+
+  if (resumeBannerTimer) clearTimeout(resumeBannerTimer);
+  resumeBannerTimer = setTimeout(() => {
+    if (banner) banner.style.display = 'none';
+  }, 10000);
+}
+
+// Phase 2: 渲染侧边栏批注卡片列表 (支持 6 态过滤与全文搜索)
+function renderAnnotationsSidebar() {
+  const panel = document.getElementById('pdf-annotations-panel');
+  const cardsList = document.getElementById('ann-cards-list');
+  const summaryEl = document.getElementById('ann-filter-summary');
+  const totalBadge = document.getElementById('ann-panel-total-badge');
+  if (!panel || !cardsList) return;
+
+  const currentDocUrl = graph.activeDoc ? graph.activeDoc.url : '';
+  const allAnns = (graph.annotations || []).filter(a => !a.docUrl || !currentDocUrl || a.docUrl === currentDocUrl);
+
+  if (totalBadge) totalBadge.innerText = allAnns.length;
+
+  let filtered = allAnns;
+  if (currentAnnFilter && currentAnnFilter !== 'all') {
+    filtered = filtered.filter(a => a.status === currentAnnFilter);
+  }
+
+  if (currentAnnSearchQuery && currentAnnSearchQuery.trim()) {
+    const q = currentAnnSearchQuery.trim().toLowerCase();
+    filtered = filtered.filter(a => {
+      const textMatch = a.text && a.text.toLowerCase().includes(q);
+      const noteMatch = a.note && a.note.toLowerCase().includes(q);
+      return textMatch || noteMatch;
+    });
+  }
+
+  // 按页码升序排序；同页码按垂直坐标或创建时间排序
+  filtered.sort((a, b) => {
+    if (a.page !== b.page) return a.page - b.page;
+    const yA = (a.rects && a.rects[0]) ? a.rects[0].y : 0;
+    const yB = (b.rects && b.rects[0]) ? b.rects[0].y : 0;
+    return yA - yB;
+  });
+
+  if (summaryEl) {
+    summaryEl.innerText = `筛选出 ${filtered.length} / ${allAnns.length} 条`;
+  }
+
+  if (filtered.length === 0) {
+    cardsList.innerHTML = `
+      <div style="color: #64748b; padding: 28px 12px; text-align: center; font-size: 11.5px; line-height: 1.6;">
+        ${allAnns.length === 0 ? '📝 当前文献暂无学习批注<br><span style="font-size: 10.5px; color: #475569;">划选文本后即可添加批注</span>' : '🔍 无匹配的批注记录'}
+      </div>
+    `;
+    return;
+  }
+
+  cardsList.innerHTML = filtered.map(ann => {
+    const meta = ANNOTATION_STATUS_META[ann.status] || ANNOTATION_STATUS_META.confused;
+    const timeStr = ann.createdAt ? new Date(ann.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    return `
+      <div class="ann-card-item ann-border-${ann.status || 'confused'}" data-ann-id="${ann.id}" data-page="${ann.page}">
+        <div class="ann-card-header">
+          <span class="ann-card-status-chip" style="color: ${meta.color};">
+            <span>${meta.icon}</span>
+            <span>${meta.label}</span>
+          </span>
+          <span class="ann-card-page-badge">第 ${ann.page} 页</span>
+        </div>
+        <div class="ann-card-text" title="${escapeHtml(ann.text || '')}">“${escapeHtml(ann.text || '')}”</div>
+        ${ann.note ? `<div class="ann-card-note" title="${escapeHtml(ann.note)}">💭 ${escapeHtml(ann.note)}</div>` : ''}
+        <div class="ann-card-footer">
+          <span class="ann-card-time">${timeStr}</span>
+          <div class="ann-card-actions">
+            <button class="ann-card-btn btn-card-canvas" title="推入图谱生成节点" data-id="${ann.id}">📌 入图</button>
+            <button class="ann-card-btn btn-card-delete" title="删除批注" data-id="${ann.id}">🗑️</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // 绑定卡片点击平滑定位与呼吸光效高亮
+  cardsList.querySelectorAll('.ann-card-item').forEach(card => {
+    card.onclick = (e) => {
+      if (e.target.closest('.ann-card-actions')) return;
+      const annId = card.dataset.annId;
+      const page = parseInt(card.dataset.page, 10);
+      scrollToPage(page, true);
+      setTimeout(() => {
+        const mark = document.querySelector(`.pdf-ann-highlight[data-ann-id="${annId}"]`);
+        if (mark) {
+          mark.classList.add('flash-highlight');
+          setTimeout(() => mark.classList.remove('flash-highlight'), 1600);
+        }
+        const badge = document.querySelector(`.pdf-ann-badge[data-ann-id="${annId}"]`);
+        if (badge) {
+          badge.classList.add('flash-highlight');
+          setTimeout(() => badge.classList.remove('flash-highlight'), 1600);
+        }
+      }, 400);
+
+      const targetAnn = (graph.annotations || []).find(a => a.id === annId);
+      if (targetAnn) {
+        const meta = ANNOTATION_STATUS_META[targetAnn.status] || ANNOTATION_STATUS_META.confused;
+        updateStatus(`[${meta.icon} ${meta.label}] 已定位至第 ${page} 页批注: “${(targetAnn.text || '').slice(0, 16)}...”`);
+      }
+    };
+  });
+
+  // 绑定“📌 入图”
+  cardsList.querySelectorAll('.btn-card-canvas').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const annId = btn.dataset.id;
+      const ann = (graph.annotations || []).find(a => a.id === annId);
+      if (ann) pushAnnotationToCanvas(ann);
+    };
+  });
+
+  // 绑定“🗑️ 删除”
+  cardsList.querySelectorAll('.btn-card-delete').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const annId = btn.dataset.id;
+      const ann = (graph.annotations || []).find(a => a.id === annId);
+      if (!ann) return;
+      const page = ann.page;
+      graph.annotations = (graph.annotations || []).filter(a => a.id !== annId);
+      debouncedSave();
+      renderAnnotationsForPage(page);
+      updateReaderAnnotationCount();
+      renderAnnotationsSidebar();
+      refreshOutlineHeatmap();
+      updateStatus('🗑️ 已删除该条批注');
+    };
+  });
 }
 
 // 打开批注便签气泡卡片 (Note Bubble)
@@ -2133,6 +2411,8 @@ function initReaderAnnotationSystem() {
       updateBubbleStatusUI(newStatus);
       debouncedSave();
       renderAnnotationsForPage(currentActiveAnnotation.page);
+      renderAnnotationsSidebar();
+      refreshOutlineHeatmap();
       const meta = ANNOTATION_STATUS_META[newStatus];
       updateStatus(`批注状态已更新为: ${meta.icon} ${meta.label}`);
     };
@@ -2153,6 +2433,7 @@ function initReaderAnnotationSystem() {
         debouncedSave();
         if (saveStatus) saveStatus.innerText = '已自动保存';
         renderAnnotationsForPage(currentActiveAnnotation.page);
+        renderAnnotationsSidebar();
       }, 400);
     };
   }
@@ -2168,6 +2449,8 @@ function initReaderAnnotationSystem() {
       debouncedSave();
       renderAnnotationsForPage(page);
       updateReaderAnnotationCount();
+      renderAnnotationsSidebar();
+      refreshOutlineHeatmap();
       closeNoteBubble();
       updateStatus('🗑️ 已删除该条批注');
     };
@@ -2191,9 +2474,48 @@ function initReaderAnnotationSystem() {
     };
   }
 
-  // 10. 导航栏批注跳转计数器
-  if (btnAnnotations) {
+  // 10. 批注抽屉侧边栏切换与控制器绑定 (Phase 2)
+  const annPanel = document.getElementById('pdf-annotations-panel');
+  const btnCloseAnnPanel = document.getElementById('btn-close-ann-panel');
+  const annSearchInput = document.getElementById('ann-search-input');
+  const btnAnnJumpNext = document.getElementById('btn-ann-jump-next');
+
+  if (btnAnnotations && annPanel) {
     btnAnnotations.onclick = () => {
+      const isVisible = annPanel.style.display === 'flex';
+      annPanel.style.display = isVisible ? 'none' : 'flex';
+      btnAnnotations.classList.toggle('active', !isVisible);
+      if (!isVisible) {
+        renderAnnotationsSidebar();
+      }
+    };
+  }
+
+  if (btnCloseAnnPanel && annPanel) {
+    btnCloseAnnPanel.onclick = () => {
+      annPanel.style.display = 'none';
+      if (btnAnnotations) btnAnnotations.classList.remove('active');
+    };
+  }
+
+  if (annSearchInput) {
+    annSearchInput.oninput = () => {
+      currentAnnSearchQuery = annSearchInput.value;
+      renderAnnotationsSidebar();
+    };
+  }
+
+  document.querySelectorAll('.ann-filter-pill').forEach(pill => {
+    pill.onclick = () => {
+      document.querySelectorAll('.ann-filter-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      currentAnnFilter = pill.dataset.filter || 'all';
+      renderAnnotationsSidebar();
+    };
+  });
+
+  if (btnAnnJumpNext) {
+    btnAnnJumpNext.onclick = () => {
       jumpToNextAnnotation();
     };
   }
@@ -2254,6 +2576,8 @@ function createAnnotationFromPending(status = 'confused', openBubble = false) {
   debouncedSave();
   renderAnnotationsForSlot(p.slot, p.pageNum);
   updateReaderAnnotationCount();
+  renderAnnotationsSidebar();
+  refreshOutlineHeatmap();
 
   const annToolbar = document.getElementById('reader-annotation-toolbar');
   if (annToolbar) annToolbar.style.display = 'none';
