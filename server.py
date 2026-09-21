@@ -20,7 +20,7 @@ if sys.platform.startswith("win") and hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-PORT = 8765
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else int(os.environ.get("PORT", 8765))
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
 MATERIALS_DIR = PUBLIC_DIR / "materials"
