@@ -377,6 +377,12 @@ body {
   background: rgba(16, 185, 129, 0.25);
 }
 
+.btn-success.active {
+  background: rgba(16, 185, 129, 0.3);
+  border-color: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.35);
+}
+
 /* 画布视口 */
 .canvas-container {
   width: 100vw;
@@ -425,16 +431,30 @@ body {
   stroke-width: 2px;
 }
 
+.edge-path.edge-hover,
 .edge-path:hover {
   stroke: #f43f5e !important;
   stroke-width: 3.6px !important;
-  filter: drop-shadow(0 0 6px rgba(244, 63, 94, 0.6));
+  filter: drop-shadow(0 0 8px rgba(244, 63, 94, 0.75));
+}
+
+.edge-path.unplugging {
+  stroke: #f43f5e !important;
+  stroke-dasharray: 4 4 !important;
+  opacity: 0.25 !important;
+}
+
+#temp-disconnecting-path {
+  stroke: #f43f5e !important;
+  stroke-dasharray: 6 5 !important;
+  stroke-width: 3.2px !important;
+  filter: drop-shadow(0 0 10px rgba(244, 63, 94, 0.85)) !important;
 }
 
 .edge-hitarea {
   fill: none;
   stroke: transparent;
-  stroke-width: 20px;
+  stroke-width: 22px;
   pointer-events: stroke;
   cursor: pointer;
 }
@@ -471,6 +491,24 @@ body {
 
 .node.conclusion {
   border-left: 4px solid var(--accent-amber);
+}
+
+.node.source_code {
+  border-left: 4px solid #06b6d4;
+}
+
+.node.hardware_probe {
+  border-left: 4px solid #a855f7;
+}
+
+.node.tracer {
+  border-left: 4px solid #3b82f6;
+}
+
+.node.tracer .node-content {
+  max-height: none;
+  overflow-y: visible;
+  padding: 8px 10px;
 }
 
 .node.pending {
@@ -520,6 +558,21 @@ body {
 .badge-conclusion {
   background: rgba(245, 158, 11, 0.18);
   color: #fcd34d;
+}
+
+.badge-source_code {
+  background: rgba(6, 182, 212, 0.18);
+  color: #67e8f9;
+}
+
+.badge-hardware_probe {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+}
+
+.badge-tracer {
+  background: rgba(59, 130, 246, 0.18);
+  color: #60a5fa;
 }
 
 .node-title {
@@ -630,7 +683,9 @@ body {
   border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 8px 10px;
-  overflow-x: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
   margin: 6px 0;
 }
 
@@ -716,6 +771,25 @@ body {
   background: #34d399;
   border-color: #ffffff;
   box-shadow: 0 0 10px #34d399;
+}
+
+/* 下游节点已有连线时的流入端口 */
+.port.in.has-incoming {
+  background: #0284c7;
+  border-color: #38bdf8;
+  box-shadow: 0 0 7px rgba(56, 189, 248, 0.55);
+}
+
+.port.in.has-incoming:hover {
+  transform: translateY(-50%) scale(1.45);
+  background: #f43f5e !important;
+  border-color: #ffffff !important;
+  box-shadow: 0 0 14px rgba(244, 63, 94, 0.9) !important;
+  cursor: grab;
+}
+
+.port.in.has-incoming:active {
+  cursor: grabbing;
 }
 
 .port.out {
@@ -1351,6 +1425,84 @@ body {
 .pdf-page-slot.page-highlight {
   box-shadow: 0 0 0 3px #6366f1, 0 0 24px rgba(99, 102, 241, 0.6) !important;
   transition: box-shadow 0.3s ease;
+}
+
+/* 目录单项邻域探针按钮 */
+.outline-item-probe {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.5px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #a5b4fc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.outline-item:hover .outline-item-probe {
+  opacity: 1;
+  background: rgba(99, 102, 241, 0.35);
+  color: #ffffff;
+  border-color: rgba(99, 102, 241, 0.6);
+}
+
+.outline-item-probe:hover {
+  background: #4f46e5 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+  transform: scale(1.05);
+}
+
+/* 画布卡片物理文献切片来源徽章 */
+.node-source-anchor-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.32);
+  color: #818cf8;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-top: 6px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.node-source-anchor-badge:hover {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.7);
+  color: #c7d2fe;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+  transform: translateY(-1px);
+}
+
+/* 邻域研读概念标签 */
+.neighborhood-concept-chip {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: 4px;
+  color: #c7d2fe;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.neighborhood-concept-chip:hover {
+  background: rgba(99, 102, 241, 0.28);
+  border-color: #818cf8;
+  color: #ffffff;
 }
 
 /* ==========================================
@@ -2296,6 +2448,393 @@ body {
   border-color: rgba(0, 0, 0, 0.12);
 }
 
+/* ==========================================
+   源码与硬件探针多态排版规范 (MVP 3.0)
+   ========================================== */
+.code-block-wrapper {
+  margin: 8px 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(15, 23, 42, 0.85);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+}
+
+.code-lang-tag {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #38bdf8;
+  letter-spacing: 0.5px;
+}
+
+.code-copy-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #94a3b8;
+  font-size: 10.5px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.code-copy-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.code-pre {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11.8px;
+  line-height: 1.55;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #e2e8f0;
+  tab-size: 4;
+}
+
+/* 语法高亮 Token 色彩体系 */
+.tok-kw { color: #f472b6; font-weight: 600; }
+.tok-type { color: #38bdf8; font-weight: 600; }
+.tok-fn { color: #818cf8; font-weight: 600; }
+.tok-str { color: #34d399; }
+.tok-comm { color: #64748b; font-style: italic; }
+.tok-num { color: #fbbf24; }
+.tok-macro { color: #c084fc; font-weight: 600; }
+.tok-reg { color: #fb923c; font-weight: 600; }
+.tok-op { color: #94a3b8; }
+
+/* 行内代码标记 */
+.inline-code-badge {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #38bdf8;
+}
+
+/* 硬件探针卡片专属组件 */
+.probe-loc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  color: #c084fc;
+  background: rgba(168, 85, 247, 0.12);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  margin-bottom: 8px;
+}
+
+.probe-grid-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  margin: 6px 0 3px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.reg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.28);
+  padding: 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.reg-item {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 10.5px;
+  color: #e2e8f0;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.reg-name {
+  color: #fb923c;
+  font-weight: 600;
+}
+
+.reg-val {
+  color: #34d399;
+}
+
+/* 源码实证与硬件探针默认加宽至 440px 充裕视窗 */
+.node.source_code,
+.node.hardware_probe {
+  width: 440px;
+}
+
+.disasm-box {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #94a3b8;
+  max-height: 130px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 彻底隐藏所有横向滚动条，零多余视觉杂质 */
+*::-webkit-scrollbar:horizontal {
+  display: none !important;
+  height: 0 !important;
+}
+
+.code-pre,
+.disasm-box,
+.node-content {
+  -ms-overflow-style: none; /* IE / Edge */
+}
+
+/* 卡片一键宽屏切换与右下角自由拖拉手柄 */
+.node-btn-width {
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+.node-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  cursor: se-resize;
+  opacity: 0.25;
+  transition: opacity 0.15s ease;
+  z-index: 25;
+  background: linear-gradient(135deg, transparent 50%, rgba(148, 163, 184, 0.6) 50%);
+  border-bottom-right-radius: 8px;
+}
+.node:hover .node-resize-handle {
+  opacity: 0.7;
+}
+.node-resize-handle:hover {
+  opacity: 1;
+  background: linear-gradient(135deg, transparent 50%, #38bdf8 50%);
+}
+
+.disasm-active-line {
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.18);
+  font-weight: 600;
+  display: inline-block;
+  width: 100%;
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+/* 硬件探针入图脉冲光晕动效 */
+@keyframes probe-halo-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.8), 0 0 20px rgba(168, 85, 247, 0.6); }
+  60% { box-shadow: 0 0 0 16px rgba(168, 85, 247, 0), 0 0 36px rgba(168, 85, 247, 0.9); }
+  100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0), 0 12px 32px rgba(0, 0, 0, 0.7); }
+}
+
+.node.probe-halo {
+  animation: probe-halo-pulse 1.8s ease-out 2;
+}
+
+/* 浅色主题适配 */
+[data-theme="light"] .code-block-wrapper {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .code-block-header {
+  background: #e2e8f0;
+  border-bottom-color: #cbd5e1;
+}
+
+[data-theme="light"] .code-pre {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+[data-theme="light"] .inline-code-badge {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0284c7;
+}
+
+[data-theme="light"] .reg-grid {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .reg-item {
+  color: #0f172a;
+}
+
+[data-theme="light"] .reg-name {
+  color: #c2410c;
+}
+
+[data-theme="light"] .reg-val {
+  color: #047857;
+}
+
+[data-theme="light"] .disasm-box {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #334155;
+}
+
+[data-theme="light"] .badge-source_code {
+  background: rgba(8, 145, 178, 0.15);
+  color: #0e7490;
+}
+
+[data-theme="light"] .badge-hardware_probe {
+  background: rgba(147, 51, 234, 0.15);
+  color: #7e22ce;
+}
+
+[data-theme="light"] .badge-tracer {
+  background: rgba(37, 99, 235, 0.15);
+  color: #1d4ed8;
+}
+
+.tracer-container {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+.tracer-fullscreen-host {
+  width: 100%;
+  min-height: 420px;
+}
+
+/* 下游端口快速断线与依赖管理气泡 */
+.port-in-popover {
+  position: fixed;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 15px rgba(244, 63, 94, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  z-index: 999;
+  min-width: 220px;
+  max-width: 320px;
+  color: #f8fafc;
+  animation: popoverFadeIn 0.15s ease-out;
+}
+
+@keyframes popoverFadeIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.port-in-popover-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  padding: 2px 4px 6px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.port-in-popover-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 4px;
+}
+
+.port-in-popover-item:hover {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: rgba(244, 63, 94, 0.4);
+  color: #fecdd3;
+}
+
+.port-in-popover-item .btn-cut {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: rgba(244, 63, 94, 0.2);
+  border: 1px solid rgba(244, 63, 94, 0.5);
+  color: #f43f5e;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.port-in-popover-item .btn-cut:hover {
+  background: #f43f5e;
+  color: #ffffff;
+}
+
+/* 全局非阻塞轻量 Toast 通知条 */
+.axiom-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(244, 63, 94, 0.45);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 16px rgba(244, 63, 94, 0.3);
+  backdrop-filter: blur(14px);
+  color: #f8fafc;
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  z-index: 9999;
+  opacity: 0;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+  pointer-events: none;
+}
+
+.axiom-toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
 /* ==========================================
    Phase 1: 教材阅读学习批注系统 (Annotation & Note Bubbles)
    ========================================== */

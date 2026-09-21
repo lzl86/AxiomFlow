@@ -40,9 +40,87 @@ let dragStartPos = { x: 0, y: 0 };
 let isActuallyDragging = false;
 let connectingSourceId = null;
 let tempMousePos = { x: 0, y: 0 };
+let unpluggingState = null; // 下游断线/拔除临时交互状态
+
+// 拓扑图历史快照栈 (为连线剪除与节点调整提供 Ctrl+Z 毫秒级复原，杜绝突兀弹窗)
+const graphHistory = [];
+const MAX_GRAPH_HISTORY = 30;
+
+function pushGraphHistory() {
+  try {
+    graphHistory.push(JSON.stringify({
+      nodes: graph.nodes,
+      edges: graph.edges
+    }));
+    if (graphHistory.length > MAX_GRAPH_HISTORY) graphHistory.shift();
+  } catch (e) {
+    console.warn('保存历史快照失败:', e);
+  }
+}
+
+function undoGraph() {
+  if (graphHistory.length === 0) {
+    showToastNotification("已是最初状态，无更多可撤销操作");
+    return;
+  }
+  const snapshotJson = graphHistory.pop();
+  try {
+    const snapshot = JSON.parse(snapshotJson);
+    graph.nodes = snapshot.nodes || [];
+    graph.edges = snapshot.edges || [];
+    saveGraph();
+    renderNodes();
+    requestAnimationFrame(() => renderEdges());
+    if (selectedNodeId) updateContextInspector();
+    showToastNotification("↩️ 已成功撤销上一步操作 (连线与拓扑已复原)");
+  } catch (err) {
+    console.error('撤销失败:', err);
+  }
+}
+
+// 统一非阻塞轻量 Toast 通知条与快速撤销通道
+function showToastNotification(htmlText, onUndo = null) {
+  let toast = document.getElementById('axiom-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'axiom-toast';
+    document.body.appendChild(toast);
+  }
+
+  toast.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span>${htmlText}</span>
+      ${onUndo ? `<button id="btn-toast-undo" style="background: rgba(99,102,241,0.25); border: 1px solid #818cf8; color: #c7d2fe; font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer; transition: background 0.15s;">↩️ 撤销 (Ctrl+Z)</button>` : ''}
+    </div>
+  `;
+  toast.className = 'axiom-toast show';
+
+  if (onUndo) {
+    const undoBtn = document.getElementById('btn-toast-undo');
+    if (undoBtn) {
+      undoBtn.onclick = (e) => {
+        e.stopPropagation();
+        onUndo();
+        toast.className = 'axiom-toast';
+      };
+    }
+  }
+
+  toast.onmouseenter = () => clearTimeout(toast._hideTimer);
+  toast.onmouseleave = () => {
+    clearTimeout(toast._hideTimer);
+    toast._hideTimer = setTimeout(() => { toast.className = 'axiom-toast'; }, 3000);
+  };
+
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => {
+    toast.className = 'axiom-toast';
+  }, 7000);
+}
 
 // 概念询问上下文缓存
 let inquiryParentNode = null;
+let neighborhoodActiveContext = null;
 
 const world = document.getElementById('canvas-world');
 const svgEdges = document.getElementById('svg-edges');
@@ -160,6 +238,7 @@ function startVersionPolling() {
       const data = await res.json();
       if (lastMtime && data.mtime > lastMtime) {
         lastMtime = data.mtime;
+        const oldNodeIds = new Set(graph.nodes.map(n => n.id));
         const resG = await fetch(`/api/graph?sessionId=${encodeURIComponent(currentSessionId)}`);
         const newGraph = await resG.json();
         graph = newGraph;
@@ -167,13 +246,28 @@ function startVersionPolling() {
         requestAnimationFrame(() => renderEdges());
         if (selectedNodeId) updateContextInspector();
         loadSessionsListOnly();
+
+        // 为新引入的硬件探针或源码实证注入 1.5 秒科技感光晕脉冲
+        const newProbes = graph.nodes.filter(n => !oldNodeIds.has(n.id) && n.kind === 'hardware_probe');
+        if (newProbes.length > 0) {
+          setTimeout(() => {
+            newProbes.forEach(np => {
+              const el = document.querySelector(`.node[data-id="${np.id}"]`);
+              if (el) {
+                el.classList.add('probe-halo');
+                setTimeout(() => el.classList.remove('probe-halo'), 3600);
+              }
+            });
+            updateStatus(`检测到外部 GDB 硬件探针入图: ${newProbes[0].title || newProbes[0].id}`);
+          }, 80);
+        }
       } else if (!lastMtime) {
         lastMtime = data.mtime;
       }
     } catch (e) {
       // 忽略轮询网络抖动
     }
-  }, 1500);
+  }, 800);
 }
 
 // 屏幕坐标转画布世界坐标（消除顶部 54px 导航栏与缩放偏移）
@@ -232,22 +326,42 @@ function createNodeElement(node) {
   div.style.left = `${node.x}px`;
   div.style.top = `${node.y}px`;
   div.dataset.id = node.id;
+  if (node.width) {
+    div.style.width = `${node.width}px`;
+  } else if (node.kind === 'tracer') {
+    div.style.width = '740px';
+  }
 
   const kindNames = {
     question: '探索课题',
     material: '文献实证',
-    conclusion: '综合结论'
+    conclusion: '综合结论',
+    source_code: '源码实证',
+    hardware_probe: '硬件探针',
+    tracer: '微观沙盒'
   };
 
   let statusBadge = '';
   if (isGenerating) {
-    statusBadge = `<span style="color: #38bdf8; font-size: 11px;">⏳ 正在推理...</span>`;
+    statusBadge = `<span style="color: #38bdf8; font-size: 11px;">推理中</span>`;
   } else if (node.status === 'pending') {
-    statusBadge = `<span style="color: #f59e0b; font-size: 11px;">● 待生成</span>`;
+    statusBadge = `<span style="color: #f59e0b; font-size: 11px;">待生成</span>`;
   }
 
+  const incomingCount = (graph.edges || []).filter(e => e.target === node.id).length;
+  const inPortTitle = incomingCount > 0
+    ? `流入依赖 (${incomingCount} 条) · 点击管理断线，或按住向左拖出以拔除连线`
+    : `上下文流入 (在此释放连线)`;
+  const inPortClass = incomingCount > 0 ? 'port in has-incoming' : 'port in';
+
+  const anchorBadgeHtml = node.source_anchor ? `
+    <div class="node-source-anchor-badge" onclick="window.jumpToNodeSourceAnchor('${node.id}', event)" title="点击直达文献原文物理页码并高亮切片">
+      [${node.source_anchor.doc_name ? escapeHtml(node.source_anchor.doc_name).slice(0, 14) + '... · ' : ''}P.${node.source_anchor.page_range ? (node.source_anchor.page_range[0] + '-' + node.source_anchor.page_range[1]) : (node.source_anchor.target_page || '')} · 跳转查阅]
+    </div>
+  ` : '';
+
   div.innerHTML = `
-    <div class="port in" data-port="in" data-node="${node.id}" title="上下文流入 (在此释放连线)"></div>
+    <div class="${inPortClass}" data-port="in" data-node="${node.id}" title="${inPortTitle}"></div>
     <div class="port out" data-port="out" data-node="${node.id}" title="上下文流出 (按住拖拽连线)"></div>
     <div class="node-header">
       <div class="node-title-group">
@@ -256,6 +370,7 @@ function createNodeElement(node) {
       </div>
       <div style="display: flex; align-items: center; gap: 4px;">
         ${statusBadge}
+        <button class="node-btn-icon node-btn-width" title="一键宽屏展开 / 恢复紧凑 (↔)">↔</button>
         <button class="node-btn-icon node-btn-expand" title="全屏学术阅读 (双击卡片也可进入)">⛶</button>
         <button class="node-btn-icon node-btn-del" title="删除节点">✕</button>
       </div>
@@ -263,23 +378,47 @@ function createNodeElement(node) {
     <div class="node-content">
       ${node.kind === 'material' 
         ? `${node.imageUrl ? `<div style="margin-bottom: 8px; text-align: center; background: #ffffff; padding: 4px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 2px 8px rgba(0,0,0,0.5);"><img src="${node.imageUrl}" style="max-width: 100%; max-height: 180px; object-fit: contain; display: block; margin: 0 auto;" alt="原版公式切片"></div>` : ''}
-           ${node.ocrStatus === 'pending' ? `<div style="font-size: 11px; color: #38bdf8; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; background: rgba(56, 189, 248, 0.1); padding: 3px 6px; border-radius: 4px; border: 1px dashed rgba(56, 189, 248, 0.4);"><span>⏳ 正在由 Gemini 反编译公式...</span><button onclick="retryOcrFormula('${node.id}', event)" class="btn" style="padding: 1px 6px; font-size: 10px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.5);" title="若时间过长可点击重试">重试</button></div>` : ''}
-           ${node.ocrStatus === 'failed' ? `<div style="font-size: 11px; color: #f87171; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; background: rgba(239, 68, 68, 0.1); padding: 3px 6px; border-radius: 4px; border: 1px dashed rgba(239, 68, 68, 0.4);"><span>⚠️ 反编译未完成</span><button onclick="retryOcrFormula('${node.id}', event)" class="btn" style="padding: 1px 6px; font-size: 10px; background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5);">重新解析</button></div>` : ''}
+           ${node.ocrStatus === 'pending' ? `<div style="font-size: 11px; color: #38bdf8; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; background: rgba(56, 189, 248, 0.1); padding: 3px 6px; border-radius: 4px; border: 1px dashed rgba(56, 189, 248, 0.4);"><span>正在反编译公式...</span><button onclick="retryOcrFormula('${node.id}', event)" class="btn" style="padding: 1px 6px; font-size: 10px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.5);" title="若时间过长可点击重试">重试</button></div>` : ''}
+           ${node.ocrStatus === 'failed' ? `<div style="font-size: 11px; color: #f87171; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; background: rgba(239, 68, 68, 0.1); padding: 3px 6px; border-radius: 4px; border: 1px dashed rgba(239, 68, 68, 0.4);"><span>反编译未完成</span><button onclick="retryOcrFormula('${node.id}', event)" class="btn" style="padding: 1px 6px; font-size: 10px; background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5);">重新解析</button></div>` : ''}
            <blockquote>${renderMarkdown(node.excerpt || node.content || '')}</blockquote>
-           ${node.citation ? `<div class="citation-chip">📖 ${escapeHtml(node.citation)}</div>` : ''}`
-        : `<div class="card-question-text" style="font-weight: 600; color: var(--text-primary); line-height: 1.45; cursor: text;" title="点击可直接在右侧面板编辑问题">${renderMarkdown(node.question || '<em>(点击在此输入具体科研问题...)</em>')}</div>
-           <div class="markdown-body" style="margin-top: 8px;">${isGenerating ? '<span style="color: #38bdf8;">🧠 大模型正在深度严密推演中...</span>' : renderMarkdown(node.response || '(点击右侧请求生成)')}</div>`
+           ${node.citation ? `<div class="citation-chip">出处: ${escapeHtml(node.citation)}</div>` : ''}`
+        : node.kind === 'source_code'
+        ? `<div class="code-block-wrapper" style="margin-top: 0; margin-bottom: 6px;">
+             <div class="code-block-header">
+               <span class="code-lang-tag">${escapeHtml((node.language || 'c').toUpperCase())}</span>
+               <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">复制</button>
+             </div>
+             <pre class="code-pre" style="max-height: 180px;">${highlightCode(node.code || node.content || '', node.language || 'c')}</pre>
+           </div>
+           ${node.citation ? `<div class="citation-chip">出处: ${escapeHtml(node.citation)}</div>` : ''}`
+        : node.kind === 'hardware_probe'
+        ? `${node.location ? `<div class="probe-loc-badge">断点: ${escapeHtml(node.location)}</div>` : ''}
+           <div class="probe-grid-label"><span>16 通用寄存器快照</span><span style="color: #64748b; font-size: 10px;">x86-64</span></div>
+           <div class="reg-grid" style="margin-bottom: 6px;">
+             ${renderRegistersHtml(node.registers)}
+           </div>
+           ${node.disassembly ? `
+             <div class="probe-grid-label"><span>反汇编指令流 ($pc)</span></div>
+             <div class="disasm-box">${formatDisassemblyHtml(node.disassembly)}</div>
+           ` : ''}
+           ${node.notes ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 6px; font-style: italic;">备注: ${escapeHtml(node.notes)}</div>` : ''}`
+        : node.kind === 'tracer'
+        ? `<div class="tracer-container" id="tracer-host-${node.id}"></div>`
+        : `${anchorBadgeHtml}
+           <div class="card-question-text" style="font-weight: 600; color: var(--text-primary); line-height: 1.45; cursor: text;" title="点击可直接在右侧面板编辑问题">${renderMarkdown(node.question || '<em>(点击在此输入具体科研问题...)</em>')}</div>
+           <div class="markdown-body" style="margin-top: 8px;">${isGenerating ? '<span style="color: #38bdf8;">模型正在深度严密推演中...</span>' : renderMarkdown(node.response || '(点击右侧请求生成)')}</div>`
       }
     </div>
     <div class="node-footer">
-      <span>${node.kind === 'material' ? '客观事实锚点' : '模型思考单元'}</span>
+      <span>${node.kind === 'material' ? '客观事实锚点' : (node.kind === 'source_code' ? '源码公理锚点' : (node.kind === 'hardware_probe' ? '硬件物理快照' : (node.kind === 'tracer' ? '可探索微观沙盒' : '模型思考单元')))}</span>
       <div style="font-size: 10.5px; color: #64748b;">双击全屏</div>
+      <div class="node-resize-handle" title="拖拽调整卡片宽度"></div>
     </div>
   `;
 
   // 单击选中（若点击的是问题文本，自动聚焦右侧输入框）
   div.addEventListener('click', (e) => {
-    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select')) return;
+    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select, .node-resize-handle')) return;
     selectNode(node.id);
     if (e.target.closest('.card-question-text')) {
       setTimeout(() => {
@@ -291,9 +430,18 @@ function createNodeElement(node) {
 
   // 双击全屏阅读
   div.addEventListener('dblclick', (e) => {
-    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select')) return;
+    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select, .node-resize-handle')) return;
     openCardFullscreen(node);
   });
+
+  // 宽屏/紧凑切换按钮
+  const widthBtn = div.querySelector('.node-btn-width');
+  if (widthBtn) {
+    widthBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.toggleNodeWidth(node.id, e);
+    });
+  }
 
   // 放大按钮
   const expandBtn = div.querySelector('.node-btn-expand');
@@ -313,9 +461,40 @@ function createNodeElement(node) {
     });
   }
 
+  // 自由调整卡片宽度拖拽手柄
+  const resizeHandle = div.querySelector('.node-resize-handle');
+  if (resizeHandle) {
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const startX = e.clientX;
+      const initialWidth = div.offsetWidth;
+      div.style.transition = 'none';
+
+      const onMouseMove = (moveEv) => {
+        const deltaX = (moveEv.clientX - startX) / (zoom || 1);
+        const newWidth = Math.max(300, Math.min(960, Math.round(initialWidth + deltaX)));
+        div.style.width = newWidth + 'px';
+        node.width = newWidth;
+        updateConnectedEdges(node.id);
+      };
+
+      const onMouseUp = () => {
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        div.style.transition = '';
+        updateConnectedEdges(node.id);
+        saveGraph();
+      };
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    });
+  }
+
   // 节点拖拽
   div.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select')) return;
+    if (e.target.closest('.port, .node-btn-icon, button, a, input, textarea, select, .node-resize-handle, .tracer-container')) return;
     draggingNodeId = node.id;
     dragStartPos = { x: e.clientX, y: e.clientY };
     isActuallyDragging = false;
@@ -326,6 +505,25 @@ function createNodeElement(node) {
     };
     e.stopPropagation();
   });
+
+  if (node.kind === 'tracer') {
+    setTimeout(() => {
+      const tracerHost = div.querySelector(`#tracer-host-${node.id}`);
+      if (tracerHost) {
+        const tracerName = node.tracer || 'socket_lifecycle';
+        import(`/tracers/${tracerName}.js?t=${Date.now()}`)
+          .then(mod => {
+            if (mod && typeof mod.mountTracer === 'function') {
+              mod.mountTracer(tracerHost, node.params || {});
+            }
+          })
+          .catch(err => {
+            console.error(`Failed to load tracer: ${tracerName}`, err);
+            tracerHost.innerHTML = `<div style="padding: 12px; color: #ef4444; font-size: 12px;">沙盒模块加载失败: ${escapeHtml(err.message)}</div>`;
+          });
+      }
+    }, 0);
+  }
 
   return div;
 }
@@ -357,6 +555,8 @@ function renderEdges() {
     </defs>
     <!-- 专用临时拖拽连线（避免频繁 DOM 创建与销毁） -->
     <path id="temp-connecting-path" class="edge-path" style="stroke: #38bdf8; stroke-dasharray: 5 5; pointer-events: none; display: none;"></path>
+    <!-- 专用临时反向拔除/断线连线 -->
+    <path id="temp-disconnecting-path" class="edge-path" style="stroke: #f43f5e; stroke-dasharray: 6 5; stroke-width: 3.2px; pointer-events: none; display: none; filter: drop-shadow(0 0 10px rgba(244, 63, 94, 0.85));"></path>
   `;
 
   (graph.edges || []).forEach(edge => {
@@ -378,12 +578,6 @@ function renderEdges() {
     hitPath.dataset.source = edge.source;
     hitPath.dataset.target = edge.target;
     hitPath.dataset.id = edge.id;
-    hitPath.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (confirm("是否剪断此连线？（剪断后该节点将从下游 AI 视野中物理切除）")) {
-        deleteEdge(edge.id);
-      }
-    });
 
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", pathD);
@@ -393,7 +587,24 @@ function renderEdges() {
     path.dataset.source = edge.source;
     path.dataset.target = edge.target;
     path.dataset.id = edge.id;
-    path.title = "点击可剪断该上下文依赖";
+    path.title = "点击直接剪断此依赖连线 (或在下游端口拔除)";
+
+    // 鼠标悬停高亮同步
+    hitPath.addEventListener("mouseenter", () => path.classList.add("edge-hover"));
+    hitPath.addEventListener("mouseleave", () => path.classList.remove("edge-hover"));
+
+    // 点击直接剪断（彻底根除突兀的原生 confirm 弹窗，支持 Ctrl+Z 毫秒级复原）
+    hitPath.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const sNode = graph.nodes.find(n => n.id === edge.source);
+      const tNode = graph.nodes.find(n => n.id === edge.target);
+      const sTitle = sNode ? (sNode.title || sNode.id) : edge.source;
+      const tTitle = tNode ? (tNode.title || tNode.id) : edge.target;
+      deleteEdge(edge.id);
+      showToastNotification(`已剪断依赖：<strong>${escapeHtml(sTitle)}</strong> ➔ <strong>${escapeHtml(tTitle)}</strong>`, () => {
+        undoGraph();
+      });
+    });
 
     svgEdges.appendChild(hitPath);
     svgEdges.appendChild(path);
@@ -402,6 +613,26 @@ function renderEdges() {
   if (connectingSourceId) {
     updateTempConnectingEdge();
   }
+  if (unpluggingState && unpluggingState.isDragging) {
+    updateDisconnectingEdge();
+  }
+
+  // 同步刷新各节点流入端口的连线状态与提示
+  const targetCounts = {};
+  (graph.edges || []).forEach(e => {
+    targetCounts[e.target] = (targetCounts[e.target] || 0) + 1;
+  });
+  document.querySelectorAll('.port.in').forEach(p => {
+    const nid = p.dataset.node;
+    const count = targetCounts[nid] || 0;
+    if (count > 0) {
+      p.classList.add('has-incoming');
+      p.title = `流入依赖 (${count} 条) · 点击管理断线，或按住向左拖出以拔除连线`;
+    } else {
+      p.classList.remove('has-incoming');
+      p.title = '上下文流入 (在此释放连线)';
+    }
+  });
 
   // 保持当前选中的拓扑高亮状态
   if (selectedNodeId) {
@@ -442,6 +673,38 @@ function updateTempConnectingEdge() {
   } else {
     tempPath.style.display = "none";
   }
+}
+
+// 增量更新从下游拔除/断开连线的动态路径
+function updateDisconnectingEdge() {
+  const discPath = document.getElementById('temp-disconnecting-path');
+  if (!discPath) return;
+
+  if (unpluggingState && unpluggingState.isDragging) {
+    let startX, startY;
+    if (unpluggingState.pulledEdge) {
+      // 只有一条入边时：从上游端口拔出悬空连线，末端跟随光标游动
+      const sPt = getPortCenter(unpluggingState.pulledEdge.source, true);
+      startX = sPt.x;
+      startY = sPt.y;
+    } else {
+      // 多条入边时：从下游流入端口射出红色剪断激光线
+      const tPt = getPortCenter(unpluggingState.targetId, false);
+      startX = tPt.x;
+      startY = tPt.y;
+    }
+    const pathD = calculateBezierPath(startX, startY, tempMousePos.x, tempMousePos.y);
+    discPath.setAttribute("d", pathD);
+    discPath.style.display = "block";
+  } else {
+    discPath.style.display = "none";
+  }
+}
+
+function hideDisconnectingEdge() {
+  const discPath = document.getElementById('temp-disconnecting-path');
+  if (discPath) discPath.style.display = 'none';
+  document.querySelectorAll('.edge-path.unplugging').forEach(el => el.classList.remove('unplugging'));
 }
 
 // 拓扑因果聚焦高亮算法 (拓扑降噪与上下文流视效)
@@ -535,7 +798,7 @@ function updateContextInspector() {
     <!-- 节点即时输入/编辑区 -->
     <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <span style="font-size: 11px; font-weight: 700; color: #818cf8; text-transform: uppercase;">✏️ 课题即时编辑</span>
+        <span style="font-size: 11px; font-weight: 700; color: #818cf8; text-transform: uppercase;">课题即时编辑</span>
         <span style="font-size: 11px; color: #64748b; font-family: monospace;">ID: <code>${node.id}</code></span>
       </div>
 
@@ -553,6 +816,52 @@ function updateContextInspector() {
           <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">文献出处标签：</label>
           <input id="node-edit-citation" type="text" class="inquiry-textarea" style="height: 32px; font-size: 12px;" value="${escapeHtml(node.citation || '')}" placeholder="如: Liu et al., 2023, p.4">
         </div>
+      ` : node.kind === 'source_code' ? `
+        <div style="margin-bottom: 10px;">
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">编程语言：</label>
+          <select id="node-edit-lang" class="inquiry-textarea" style="height: 32px; font-size: 12px; color: #38bdf8; font-weight: 600;">
+            <option value="c" ${(node.language || 'c') === 'c' ? 'selected' : ''}>C / C++</option>
+            <option value="assembly" ${(node.language || '') === 'assembly' ? 'selected' : ''}>x86-64 汇编 (Assembly)</option>
+            <option value="python" ${(node.language || '') === 'python' ? 'selected' : ''}>Python</option>
+            <option value="bash" ${(node.language || '') === 'bash' ? 'selected' : ''}>Shell / Bash</option>
+            <option value="rust" ${(node.language || '') === 'rust' ? 'selected' : ''}>Rust</option>
+            <option value="verilog" ${(node.language || '') === 'verilog' ? 'selected' : ''}>Verilog / 数字逻辑</option>
+            <option value="other" ${(node.language || '') === 'other' ? 'selected' : ''}>其它语言</option>
+          </select>
+        </div>
+        <div style="margin-bottom: 10px;">
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">源码正文：</label>
+          <textarea id="node-edit-code" class="inquiry-textarea" rows="7" style="font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 11.5px; white-space: pre; line-height: 1.45;" placeholder="输入或修改源码...">${escapeHtml(node.code || node.content || '')}</textarea>
+        </div>
+        <div>
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">源码出处标签：</label>
+          <input id="node-edit-citation" type="text" class="inquiry-textarea" style="height: 32px; font-size: 12px;" value="${escapeHtml(node.citation || '')}" placeholder="如: CS:APP3e 第 8.5.6 节 p.534">
+        </div>
+      ` : node.kind === 'hardware_probe' ? `
+        <div style="margin-bottom: 8px;">
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">断点源码位置：</label>
+          <input id="node-edit-location" type="text" class="inquiry-textarea" style="height: 32px; font-size: 12px;" value="${escapeHtml(node.location || '')}" placeholder="如: eval.c:28 (0x400da2)">
+        </div>
+        <div style="margin-bottom: 8px;">
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">断点调试备注：</label>
+          <input id="node-edit-notes" type="text" class="inquiry-textarea" style="height: 32px; font-size: 12px;" value="${escapeHtml(node.notes || '')}">
+        </div>
+        <div>
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">反汇编指令流：</label>
+          <textarea id="node-edit-disasm" class="inquiry-textarea" rows="4" style="font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 11px; white-space: pre;">${escapeHtml(node.disassembly || '')}</textarea>
+        </div>
+      ` : node.kind === 'tracer' ? `
+        <div style="margin-bottom: 8px;">
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">微观沙盒模块选择：</label>
+          <select id="node-edit-tracer" class="inquiry-textarea" style="height: 32px; font-size: 12px; font-family: monospace;">
+            <option value="socket_lifecycle" ${(!node.tracer || node.tracer === 'socket_lifecycle') ? 'selected' : ''}>socket_lifecycle (CS:APP 第11章 并发套接字)</option>
+            <option value="cache_direct_mapped" ${node.tracer === 'cache_direct_mapped' ? 'selected' : ''}>cache_direct_mapped (CS:APP 第6章 直接映射Cache)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">沙盒设计与教学目标：</label>
+          <textarea id="node-edit-question" class="inquiry-textarea" rows="3" placeholder="在此输入沙盒教学目标或实验指引...">${escapeHtml(node.question || '')}</textarea>
+        </div>
       ` : `
         <div>
           <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">待解答问题 / 探索指令：</label>
@@ -562,47 +871,51 @@ function updateContextInspector() {
     </div>
 
     <!-- 拓扑分流统计 -->
-    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px;">
-      <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 8px; text-align: center;">
-        <div style="font-size: 17px; font-weight: 700; color: #34d399;">${partition.materials.length}</div>
-        <div style="font-size: 11px; color: #a7f3d0;">连入文献素材</div>
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 14px;">
+      <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 6px 4px; text-align: center;">
+        <div style="font-size: 16px; font-weight: 700; color: #34d399;">${partition.materials.length}</div>
+        <div style="font-size: 10px; color: #a7f3d0;">文献素材</div>
       </div>
-      <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px; padding: 8px; text-align: center;">
-        <div style="font-size: 17px; font-weight: 700; color: #818cf8;">${partition.references.length}</div>
-        <div style="font-size: 11px; color: #c7d2fe;">隔离引用块</div>
+      <div style="background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.25); border-radius: 8px; padding: 6px 4px; text-align: center;">
+        <div style="font-size: 16px; font-weight: 700; color: #67e8f9;">${(partition.codes ? partition.codes.length : 0) + (partition.probes ? partition.probes.length : 0)}</div>
+        <div style="font-size: 10px; color: #a5f3fc;">源码/探针</div>
       </div>
-      <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 8px; text-align: center;">
-        <div style="font-size: 17px; font-weight: 700; color: #60a5fa;">${partition.chainTurns.length}</div>
-        <div style="font-size: 11px; color: #bfdbfe;">主干对话轮数</div>
+      <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px; padding: 6px 4px; text-align: center;">
+        <div style="font-size: 16px; font-weight: 700; color: #818cf8;">${partition.references.length}</div>
+        <div style="font-size: 10px; color: #c7d2fe;">隔离引用</div>
+      </div>
+      <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 6px 4px; text-align: center;">
+        <div style="font-size: 16px; font-weight: 700; color: #60a5fa;">${partition.chainTurns.length}</div>
+        <div style="font-size: 10px; color: #bfdbfe;">主干轮数</div>
       </div>
     </div>
 
     <!-- 核心操作区（置顶优先展示，无需下滚查找） -->
     <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px;">
       <button id="btn-trigger-generate" class="btn btn-primary" style="justify-content: center; padding: 10px; font-size: 13px; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);">
-        🚀 调用 ${escapeHtml(currentConfig.model)} 原地生成解答
+        调用 ${escapeHtml(currentConfig.model)} 原地生成解答
       </button>
       
       <button id="btn-open-inquiry" class="btn" style="justify-content: center; background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: #34d399; padding: 8px; font-size: 12.5px;">
-        💡 追问特定概念 / 展开新分支节点
+        追问特定概念 / 展开新分支节点
       </button>
 
       ${node.imageUrl ? `
-      <button id="btn-re-ocr" class="btn btn-secondary" style="justify-content: center; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.4); color: #fde68a; padding: 8px; font-size: 12.5px;" title="重新请求 Gemini 多模态模型解析截取图中的 LaTeX 公式与变量">
-        📐 提取/反编译原图中的 LaTeX 公式与释义
+      <button id="btn-re-ocr" class="btn btn-secondary" style="justify-content: center; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.4); color: #fde68a; padding: 8px; font-size: 12.5px;" title="重新请求视觉模型解析截取图中的 LaTeX 公式与变量">
+        反编译提取原图中的 LaTeX 公式与释义
       </button>
       ` : ''}
     </div>
 
     <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; font-size: 11.5px; line-height: 1.45; color: var(--text-primary);">
-      <span style="color: #38bdf8; font-weight: 600;">⚡ 物理级拓扑隔离：</span>
+      <span style="color: #38bdf8; font-weight: 600;">物理拓扑隔离：</span>
       仅连入的有效祖先进入 Prompt，剪断分支在 HTTP 请求中被 100% 物理剥离。
     </div>
 
     <!-- 精准 Prompt 折叠查看区（小巧精悍，不挤占界面） -->
     <details open style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px;">
       <summary style="font-size: 12px; font-weight: 600; color: var(--text-secondary); cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-        <span>🔍 接收的精准 Prompt 预估 (<span id="prompt-token-count">${compiled.estimatedTokens} tokens</span>)</span>
+        <span>接收的精准 Prompt 预估 (<span id="prompt-token-count">${compiled.estimatedTokens} tokens</span>)</span>
         <button id="btn-copy-prompt" class="btn" style="padding: 2px 8px; font-size: 10.5px;">复制纯净输入</button>
       </summary>
       <div class="prompt-preview-box" style="margin-top: 8px; max-height: 150px;">${escapeHtml(compiled.fullText)}</div>
@@ -613,10 +926,87 @@ function updateContextInspector() {
   const titleInput = document.getElementById('node-edit-title');
   if (titleInput) {
     titleInput.oninput = (e) => {
-      node.title = e.target.value.trim() || '未命名课题';
-      const titleEl = document.querySelector(`.node[data-id="${node.id}"] .node-title`);
-      if (titleEl) titleEl.innerText = node.title;
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.title = e.target.value.trim() || '未命名课题';
+        const titleEl = document.querySelector(`.node[data-id="${node.id}"] .node-title`);
+        if (titleEl) titleEl.innerText = liveNode.title;
+      }
       debouncedSave();
+    };
+  }
+
+  // 源码代码实时编辑联动
+  const codeInput = document.getElementById('node-edit-code');
+  if (codeInput) {
+    codeInput.oninput = (e) => {
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.code = e.target.value;
+        const pre = document.querySelector(`.node[data-id="${node.id}"] .code-pre`);
+        if (pre) pre.innerHTML = highlightCode(liveNode.code || '', liveNode.language || 'c');
+      }
+      debouncedSave();
+    };
+  }
+
+  // 源码编程语言实时切换联动
+  const langSelect = document.getElementById('node-edit-lang');
+  if (langSelect) {
+    langSelect.onchange = (e) => {
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.language = e.target.value;
+        const tag = document.querySelector(`.node[data-id="${node.id}"] .code-lang-tag`);
+        if (tag) tag.innerText = (liveNode.language || 'c').toUpperCase();
+        const pre = document.querySelector(`.node[data-id="${node.id}"] .code-pre`);
+        if (pre) pre.innerHTML = highlightCode(liveNode.code || '', liveNode.language || 'c');
+      }
+      debouncedSave();
+    };
+  }
+
+  // 硬件探针断点位置联动
+  const locInput = document.getElementById('node-edit-location');
+  if (locInput) {
+    locInput.oninput = (e) => {
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.location = e.target.value;
+        const locBadge = document.querySelector(`.node[data-id="${node.id}"] .probe-loc-badge`);
+        if (locBadge) locBadge.innerText = `断点: ${liveNode.location}`;
+      }
+      debouncedSave();
+    };
+  }
+
+  // 硬件探针断点备注联动
+  const notesInput = document.getElementById('node-edit-notes');
+  if (notesInput) {
+    notesInput.oninput = (e) => {
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) liveNode.notes = e.target.value;
+      debouncedSave();
+    };
+  }
+
+  // 微观沙盒模块名称与类型切换联动
+  const tracerInput = document.getElementById('node-edit-tracer');
+  if (tracerInput) {
+    tracerInput.onchange = (e) => {
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.tracer = e.target.value.trim();
+        if (liveNode.tracer === 'cache_direct_mapped') {
+          liveNode.title = '直接映射 Cache 命中与缺失单步推演 (CS:APP 第 6 章)';
+          liveNode.question = '探索 8-bit 地址总线下 Tag/Set Index/Offset 硬件拆分与冲突缺失/颠簸机理';
+        } else if (liveNode.tracer === 'socket_lifecycle') {
+          liveNode.title = '并发套接字生命周期单步器 (CS:APP 第 11 章)';
+          liveNode.question = '探索多进程并发服务器下描述符拷贝、引用计数(refcnt)与四次挥手触发机理';
+        }
+        renderNodes();
+        debouncedSave();
+      }
     };
   }
 
@@ -624,19 +1014,22 @@ function updateContextInspector() {
   const questionInput = document.getElementById('node-edit-question');
   if (questionInput) {
     questionInput.oninput = (e) => {
-      node.question = e.target.value;
-      if (node.status === 'done') {
-        node.status = 'pending';
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.question = e.target.value;
+        if (liveNode.status === 'done') {
+          liveNode.status = 'pending';
+        }
+        const qEl = document.querySelector(`.node[data-id="${node.id}"] .card-question-text`);
+        if (qEl) qEl.innerHTML = renderMarkdown(liveNode.question || '<em>(点击右侧输入问题...)</em>');
+        // 实时重编译当前 Prompt 预估
+        const p = partitionContext(node.id, graph.nodes, graph.edges);
+        const c = compilePrompt(p);
+        const promptBox = document.querySelector('.prompt-preview-box');
+        if (promptBox) promptBox.innerText = c.fullText;
+        const tokenSpan = document.getElementById('prompt-token-count');
+        if (tokenSpan) tokenSpan.innerText = `${c.estimatedTokens} tokens`;
       }
-      const qEl = document.querySelector(`.node[data-id="${node.id}"] .card-question-text`);
-      if (qEl) qEl.innerHTML = renderMarkdown(node.question || '<em>(点击右侧输入问题...)</em>');
-      // 实时重编译当前 Prompt 预估
-      const p = partitionContext(node.id, graph.nodes, graph.edges);
-      const c = compilePrompt(p);
-      const promptBox = document.querySelector('.prompt-preview-box');
-      if (promptBox) promptBox.innerText = c.fullText;
-      const tokenSpan = document.getElementById('prompt-token-count');
-      if (tokenSpan) tokenSpan.innerText = `${c.estimatedTokens} tokens`;
       debouncedSave();
     };
   }
@@ -645,18 +1038,24 @@ function updateContextInspector() {
   const excerptInput = document.getElementById('node-edit-excerpt');
   if (excerptInput) {
     excerptInput.oninput = (e) => {
-      node.excerpt = e.target.value;
-      const bq = document.querySelector(`.node[data-id="${node.id}"] .node-content blockquote`);
-      if (bq) bq.innerHTML = renderMarkdown(node.excerpt || '');
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.excerpt = e.target.value;
+        const bq = document.querySelector(`.node[data-id="${node.id}"] .node-content blockquote`);
+        if (bq) bq.innerHTML = renderMarkdown(liveNode.excerpt || '');
+      }
       debouncedSave();
     };
   }
   const citationInput = document.getElementById('node-edit-citation');
   if (citationInput) {
     citationInput.oninput = (e) => {
-      node.citation = e.target.value;
-      const chip = document.querySelector(`.node[data-id="${node.id}"] .citation-chip`);
-      if (chip) chip.innerText = `📖 ${node.citation}`;
+      const liveNode = graph.nodes.find(n => n.id === node.id);
+      if (liveNode) {
+        liveNode.citation = e.target.value;
+        const chip = document.querySelector(`.node[data-id="${node.id}"] .citation-chip`);
+        if (chip) chip.innerText = `出处: ${liveNode.citation}`;
+      }
       debouncedSave();
     };
   }
@@ -703,7 +1102,7 @@ async function generateAnswerForNode(node) {
   const btn = document.getElementById('btn-trigger-generate');
   if (btn) {
     btn.disabled = true;
-    btn.innerText = `⏳ 正在调用 ${currentConfig.model} 深度推演中...`;
+    btn.innerText = `正在调用 ${currentConfig.model} 深度推演中...`;
   }
 
   node.status = 'generating';
@@ -728,7 +1127,7 @@ async function generateAnswerForNode(node) {
       liveNode.response = data.response;
       liveNode.status = 'done';
       if (data.mtime) lastMtime = data.mtime;
-      updateStatus(`[完成] ${currentConfig.model} 已为 #${node.id} 生成解答`);
+      updateStatus(`${currentConfig.model} 已为 #${node.id} 生成解答`);
     } else {
       showEngineDiagnosticModal(data);
       liveNode.status = 'idle';
@@ -796,6 +1195,13 @@ function extractConceptsFromNode(node) {
 // 打开“概念询问与展开”对话框
 function openConceptInquiryModal(node, initialConcept = null) {
   inquiryParentNode = node;
+  neighborhoodActiveContext = null;
+  const banner = document.getElementById('inquiry-neighborhood-banner');
+  if (banner) banner.style.display = 'none';
+
+  const headingEl = document.getElementById('inquiry-modal-heading');
+  if (headingEl) headingEl.innerText = '针对上游论断展开概念询问';
+
   document.getElementById('inquiry-parent-title').innerText = `来源节点: #${node.id} - ${node.title || node.question}`;
 
   const chipsContainer = document.getElementById('concept-chips-container');
@@ -840,7 +1246,13 @@ function openConceptInquiryModal(node, initialConcept = null) {
 
 // 提交概念询问并生成新分支
 async function submitConceptInquiry() {
-  if (!inquiryParentNode) return;
+  const isNeighborhood = Boolean(neighborhoodActiveContext);
+  let parentNode = inquiryParentNode;
+  if (!parentNode && isNeighborhood) {
+    parentNode = graph.nodes.length > 0 ? graph.nodes[0] : null;
+  }
+  if (!parentNode && !isNeighborhood) return;
+
   const textarea = document.getElementById('inquiry-question-input');
   const userQuestion = textarea.value.trim();
 
@@ -849,16 +1261,19 @@ async function submitConceptInquiry() {
     return;
   }
 
-  let newTitle = "深入追问";
+  let newTitle = isNeighborhood ? "文献邻域研读" : "深入追问";
   const matched = userQuestion.match(/【([^】]+)】/);
   if (matched) {
-    newTitle = `概念追问：${matched[1]}`;
+    newTitle = isNeighborhood ? `邻域研读：${matched[1]}` : `概念追问：${matched[1]}`;
   } else {
-    newTitle = userQuestion.slice(0, 16) + (userQuestion.length > 16 ? '...' : '');
+    newTitle = userQuestion.slice(0, 18) + (userQuestion.length > 18 ? '...' : '');
   }
 
   const newId = `n_inquiry_${Date.now()}`;
   const shouldAutoAsk = document.getElementById('inquiry-auto-ask').checked;
+
+  const posX = parentNode ? parentNode.x + 460 : 320;
+  const posY = parentNode ? parentNode.y + (Math.random() * 60 - 30) : 220;
 
   const newNode = {
     id: newId,
@@ -867,17 +1282,28 @@ async function submitConceptInquiry() {
     question: userQuestion,
     response: '',
     status: shouldAutoAsk ? 'generating' : 'idle',
-    x: inquiryParentNode.x + 460,
-    y: inquiryParentNode.y + (Math.random() * 80 - 40)
+    x: posX,
+    y: posY
   };
 
+  if (isNeighborhood && neighborhoodActiveContext) {
+    newNode.source_anchor = {
+      doc_name: neighborhoodActiveContext.doc_name,
+      page_range: neighborhoodActiveContext.page_range,
+      target_page: neighborhoodActiveContext.target_page,
+      chapterTitle: neighborhoodActiveContext.chapterTitle
+    };
+  }
+
   graph.nodes.push(newNode);
-  graph.edges.push({
-    id: `e_${Date.now()}`,
-    source: inquiryParentNode.id,
-    target: newId,
-    kind: 'solid'
-  });
+  if (parentNode) {
+    graph.edges.push({
+      id: `e_${Date.now()}`,
+      source: parentNode.id,
+      target: newId,
+      kind: 'solid'
+    });
+  }
 
   saveGraph();
   renderNodes();
@@ -885,21 +1311,32 @@ async function submitConceptInquiry() {
   selectNode(newId);
   inquiryModal.style.display = 'none';
 
+  const boundNeighborhoodCtx = neighborhoodActiveContext ? { ...neighborhoodActiveContext } : null;
+  neighborhoodActiveContext = null;
+  const banner = document.getElementById('inquiry-neighborhood-banner');
+  if (banner) banner.style.display = 'none';
+
   if (shouldAutoAsk) {
     const partition = partitionContext(newId, graph.nodes, graph.edges);
     const compiled = compilePrompt(partition);
     updateStatus(`正在请求 ${currentConfig.model} 为新分支生成解答...`);
 
     try {
+      const genPayload = {
+        nodeId: newId,
+        prompt: compiled.fullText,
+        model: currentConfig.model,
+        sessionId: currentSessionId
+      };
+      if (boundNeighborhoodCtx) {
+        genPayload.neighborhood_context = boundNeighborhoodCtx;
+        genPayload.source_anchor = newNode.source_anchor;
+      }
+
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nodeId: newId,
-          prompt: compiled.fullText,
-          model: currentConfig.model,
-          sessionId: currentSessionId
-        })
+        body: JSON.stringify(genPayload)
       });
       const data = await res.json();
       const liveNode = graph.nodes.find(n => n.id === newId) || newNode;
@@ -907,7 +1344,7 @@ async function submitConceptInquiry() {
         liveNode.response = data.response;
         liveNode.status = 'done';
         if (data.mtime) lastMtime = data.mtime;
-        updateStatus(`[完成] 新分支 #${newId} 已生成`);
+        updateStatus(`新分支 #${newId} 已生成`);
       } else {
         liveNode.status = 'idle';
         alert("生成失败: " + data.error);
@@ -937,6 +1374,12 @@ function openDrawer(tab) {
 
   activeTab = tab;
   drawer.classList.add('open');
+
+  const btnToggleReader = document.getElementById('btn-toggle-reader');
+  if (btnToggleReader) {
+    btnToggleReader.classList.toggle('active', tab === 'reader');
+  }
+
   if (tab === 'reader') {
     if (!drawer.style.width || drawer.style.width === '420px') {
       drawer.style.width = '50vw';
@@ -965,6 +1408,18 @@ function openDrawer(tab) {
   });
   document.getElementById('inspector-panel').style.display = tab === 'inspector' ? 'block' : 'none';
   document.getElementById('reader-panel').style.display = tab === 'reader' ? 'flex' : 'none';
+}
+
+function closeDrawer() {
+  const pdfViewContainer = document.getElementById('pdf-view-container');
+  if (pdfViewContainer && currentDocMode === 'pdf' && pdfViewContainer.scrollTop > 0) {
+    lastSavedPdfScrollTop = pdfViewContainer.scrollTop;
+  }
+  drawer.classList.remove('open');
+  const btnToggleReader = document.getElementById('btn-toggle-reader');
+  if (btnToggleReader) {
+    btnToggleReader.classList.remove('active');
+  }
 }
 
 // ==========================================
@@ -1109,8 +1564,7 @@ function renderDocSelectorOptions() {
     opt.dataset.type = m.type;
     opt.dataset.name = m.name;
     opt.dataset.title = m.title;
-    const icon = m.type === 'pdf' ? '📄' : '📝';
-    opt.innerText = `${icon} ${m.name}`;
+    opt.innerText = m.name;
     if (activeUrl && (activeUrl === m.url || activeUrl.endsWith(encodeURIComponent(m.name)) || activeUrl.endsWith(m.name))) {
       opt.selected = true;
     }
@@ -1172,7 +1626,7 @@ async function restoreSessionActiveDoc() {
 async function handleUploadMaterialFile(file) {
   if (!file) return;
   try {
-    updateStatus(`正在上传文献【${file.name}】...`);
+    updateStatus(`正在上传文献《${file.name}》...`);
     const reader = new FileReader();
     reader.onload = async (e) => {
       const base64Data = e.target.result.split(',')[1];
@@ -1189,7 +1643,7 @@ async function handleUploadMaterialFile(file) {
         await loadMaterialsCatalog();
         await switchActiveDocument(data.material, true);
         openDrawer('reader');
-        updateStatus(`✅ 文献【${data.material.name}】已成功上传并绑定至当前课题！`);
+        updateStatus(`文献《${data.material.name}》已成功上传并绑定至当前课题`);
       } else {
         alert("上传文献失败: " + (data.error || "未知错误"));
       }
@@ -1438,7 +1892,7 @@ function renderOutlineTree(outlineItems) {
   treeContainer.innerHTML = '';
 
   if (!outlineItems || outlineItems.length === 0) {
-    treeContainer.innerHTML = '<div style="color: #64748b; padding: 12px; text-align: center;">该文献未包含书签目录</div>';
+    treeContainer.innerHTML = '<div style="color: #64748b; padding: 12px; text-align: center;">该文献未包含书签目录，可点击右上角 [AI 骨架] 提取</div>';
     return;
   }
 
@@ -1470,9 +1924,20 @@ function renderOutlineTree(outlineItems) {
 
     row.innerHTML = `
       <span class="outline-item-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span>
-      ${heatHtml}
-      ${item.pageNum ? `<span class="outline-page-badge">P.${item.pageNum}</span>` : ''}
+      <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+        ${heatHtml}
+        ${item.pageNum ? `<button class="outline-item-probe" title="对该章节所在页 (P.${item.pageNum} ± 2) 执行邻域切片研读">探针</button>` : ''}
+        ${item.pageNum ? `<span class="outline-page-badge">P.${item.pageNum}</span>` : ''}
+      </div>
     `;
+
+    const probeBtn = row.querySelector('.outline-item-probe');
+    if (probeBtn) {
+      probeBtn.onclick = (e) => {
+        e.stopPropagation();
+        openNeighborhoodInquiry(item.pageNum, item.title);
+      };
+    }
 
     row.onclick = (e) => {
       e.stopPropagation();
@@ -1528,7 +1993,7 @@ function renderFallbackOutline(numPages) {
 
   treeContainer.innerHTML = `
     <div style="padding: 10px 8px; color: #94a3b8; font-size: 11.5px; line-height: 1.5;">
-      <p style="margin-bottom: 8px; color: #cbd5e1;">⚠️ 该 PDF 未内置书签大纲，可通过以下常用分页快速跳转：</p>
+      <p style="margin-bottom: 8px; color: #cbd5e1;">该文献未内置书签大纲，可点击上方“AI 骨架”解析或按分页跳转：</p>
       <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;">
         ${blocks}
       </div>
@@ -1536,12 +2001,231 @@ function renderFallbackOutline(numPages) {
   `;
 }
 
+// 扁平大纲层级树嵌套算法
+function buildNestedOutline(flatItems) {
+  if (!flatItems || flatItems.length === 0) return [];
+  const root = [];
+  const stack = [];
+  flatItems.forEach(raw => {
+    const node = {
+      title: raw.title ? raw.title.trim() : '未命名章节',
+      pageNum: raw.page || raw.pageNum || null,
+      items: []
+    };
+    const level = raw.level || 1;
+    while (stack.length > 0 && stack[stack.length - 1].level >= level) {
+      stack.pop();
+    }
+    if (stack.length === 0) {
+      root.push(node);
+    } else {
+      stack[stack.length - 1].node.items.push(node);
+    }
+    stack.push({ level, node });
+  });
+  return root;
+}
+
+// 服务端原生/AI大纲骨架请求
+async function requestAiOutline(aiFallback = false) {
+  const treeContainer = document.getElementById('pdf-outline-tree');
+  if (!treeContainer) return;
+  const docSelector = document.getElementById('doc-selector');
+  let docName = '';
+  if (graph.activeDoc && (graph.activeDoc.name || graph.activeDoc.title)) {
+    docName = graph.activeDoc.name || graph.activeDoc.title;
+  }
+  if (!docName && docSelector && docSelector.value) {
+    docName = decodeURIComponent(docSelector.value.split('/').pop());
+  }
+  if (!docName) {
+    updateStatus('请先在阅读器中载入文献资产');
+    return;
+  }
+  treeContainer.innerHTML = '<div style="color: #64748b; padding: 12px; text-align: center;">正在通过服务端解析大纲骨架...</div>';
+  try {
+    const res = await fetch('/api/paper-outline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_name: docName, ai_fallback: aiFallback })
+    });
+    const data = await res.json();
+    if (data.ok && data.outline && data.outline.length > 0) {
+      currentPdfOutline = buildNestedOutline(data.outline);
+      renderOutlineTree(currentPdfOutline);
+      updateStatus(`大纲骨架已就绪 (${data.source === 'native' ? '原生书签' : (data.source === 'ai' ? 'AI 提取' : '文档结构')}, 共 ${data.outline.length} 项)`);
+    } else {
+      updateStatus('未能提取到大纲结构');
+      if (currentPdfDoc) renderFallbackOutline(currentPdfDoc.numPages);
+    }
+  } catch (err) {
+    console.error('提取大纲失败:', err);
+    updateStatus(`提取大纲失败: ${err.message}`);
+  }
+}
+window.requestAiOutline = requestAiOutline;
+
+// 邻域切片学术概念快速提取
+function extractConceptsFromExcerpt(text) {
+  if (!text) return [];
+  const found = new Set();
+
+  const bracketMatches = text.match(/[【《“"']([^【】《》“”"'\n\r]{2,20})[】》”"']/g) || [];
+  bracketMatches.forEach(m => {
+    const clean = m.replace(/[【】《》“”"']/g, '').trim();
+    if (clean.length >= 2 && clean.length <= 16) found.add(clean);
+  });
+
+  const symbolMatches = text.match(/\b([A-Z]{2,6}|NA|OTF|PTF|ATF|PSF|DPC|QPI|TIE|DoP)\b/g) || [];
+  symbolMatches.forEach(s => found.add(s));
+
+  const termRegex = /([\u4e00-\u9fa5]{2,8}(?:成像|调制|相衬|显微|算法|矩阵|函数|积分|滤波器|衍射|光瞳|分辨率|相位|光强|波前|色差|照明|方程|卷积|反演|层析))/g;
+  let match;
+  while ((match = termRegex.exec(text)) !== null) {
+    if (match[1] && match[1].length >= 3 && match[1].length <= 10) {
+      found.add(match[1]);
+    }
+  }
+
+  const stopWords = new Set(['本章小结', '实验结果', '研究内容', '国内外研究', '主要工作', '本节介绍']);
+  const result = Array.from(found).filter(item => !stopWords.has(item));
+  return result.slice(0, 10);
+}
+
+// 打开“文献邻域探针研读”对话框
+async function openNeighborhoodInquiry(targetPage, chapterTitle = null) {
+  const docSelector = document.getElementById('doc-selector');
+  let docName = '';
+  if (graph.activeDoc && (graph.activeDoc.name || graph.activeDoc.title)) {
+    docName = graph.activeDoc.name || graph.activeDoc.title;
+  }
+  if (!docName && docSelector && docSelector.value) {
+    docName = decodeURIComponent(docSelector.value.split('/').pop());
+  }
+  if (!docName) {
+    alert('请先在文献阅读器中选择或载入文献资产！');
+    return;
+  }
+  const page = targetPage || currentPdfPageNum || 1;
+  updateStatus(`正在提取文献《${docName}》第 P.${page} 页前后邻域物理切片...`);
+
+  try {
+    const res = await fetch('/api/paper-neighborhood', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        doc_name: docName,
+        page: page,
+        window: 2
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(data.error || '提取切片失败');
+    }
+
+    neighborhoodActiveContext = {
+      doc_name: data.doc_name,
+      target_page: data.target_page,
+      page_range: data.page_range,
+      excerpt: data.excerpt,
+      char_count: data.char_count,
+      total_pages: data.total_pages,
+      chapterTitle: chapterTitle
+    };
+
+    const headingEl = document.getElementById('inquiry-modal-heading');
+    if (headingEl) headingEl.innerText = chapterTitle ? `针对章节【${chapterTitle}】展开邻域研读` : `针对第 P.${page} 页展开邻域研读`;
+
+    const parentTitleEl = document.getElementById('inquiry-parent-title');
+    if (parentTitleEl) parentTitleEl.innerText = `文献: ${data.doc_name} · 物理切片: P.${data.page_range[0]}-${data.page_range[1]}`;
+
+    const banner = document.getElementById('inquiry-neighborhood-banner');
+    if (banner) {
+      banner.style.display = 'block';
+      const targetEl = document.getElementById('neighborhood-banner-target');
+      if (targetEl) targetEl.innerText = `P.${data.target_page} ± 2 (P.${data.page_range[0]}-${data.page_range[1]})`;
+      const charsEl = document.getElementById('neighborhood-banner-chars');
+      if (charsEl) charsEl.innerText = `${data.char_count.toLocaleString()} 字符`;
+      const docEl = document.getElementById('neighborhood-banner-doc');
+      if (docEl) docEl.innerText = `文献: ${data.doc_name}${chapterTitle ? ' · 章节: ' + chapterTitle : ''}`;
+    }
+
+    const concepts = extractConceptsFromExcerpt(data.excerpt);
+    const chipsContainer = document.getElementById('concept-chips-container');
+    chipsContainer.innerHTML = '';
+    if (concepts.length === 0) {
+      chipsContainer.innerHTML = '<span style="font-size: 11px; color: #64748b;">(未自动提取到特征词，请在下方自由输入)</span>';
+    } else {
+      concepts.forEach(c => {
+        const chip = document.createElement('div');
+        chip.className = 'neighborhood-concept-chip';
+        chip.innerText = `+ ${c}`;
+        chip.title = `点击填入关于【${c}】的探针问题`;
+        chip.onclick = () => {
+          const textarea = document.getElementById('inquiry-question-input');
+          textarea.value = `基于文献 P.${data.page_range[0]}-${data.page_range[1]} 原文切片，深入剖析【${c}】的物理机理、数学推导与实验参数。`;
+          textarea.focus();
+        };
+        chipsContainer.appendChild(chip);
+      });
+    }
+
+    const textarea = document.getElementById('inquiry-question-input');
+    const defaultTopic = chapterTitle || (concepts.length > 0 ? concepts[0] : `第 P.${page} 页核心推论`);
+    textarea.value = `基于文献 P.${data.page_range[0]}-${data.page_range[1]} 物理原文切片，深入剖析【${defaultTopic}】的理论推导与实验实证结论。`;
+
+    inquiryParentNode = null;
+    if (selectedNodeId) {
+      const liveSelected = graph.nodes.find(n => n.id === selectedNodeId);
+      if (liveSelected) inquiryParentNode = liveSelected;
+    }
+
+    inquiryModal.style.display = 'flex';
+    setTimeout(() => {
+      textarea.focus();
+    }, 100);
+
+    updateStatus(`邻域切片 P.${data.page_range[0]}-${data.page_range[1]} 已挂载至研读探针`);
+  } catch (err) {
+    console.error('获取邻域切片失败:', err);
+    alert(`获取文献邻域物理切片失败: ${err.message}`);
+    updateStatus(`邻域切片提取失败: ${err.message}`);
+  }
+}
+window.openNeighborhoodInquiry = openNeighborhoodInquiry;
+
+// 卡片文献切片点击直达跳转与高亮
+window.jumpToNodeSourceAnchor = async function(nodeId, event) {
+  if (event) event.stopPropagation();
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node || !node.source_anchor) return;
+  const sa = node.source_anchor;
+
+  const drawer = document.getElementById('drawer');
+  if (drawer && !drawer.classList.contains('open')) {
+    openDrawer('reader');
+  } else {
+    const readerTabBtn = document.querySelector('.drawer-tab[data-tab="reader"]');
+    if (readerTabBtn) readerTabBtn.click();
+  }
+
+  const docItem = materialsCatalog.find(m => m.name === sa.doc_name || m.title === sa.doc_name);
+  if (docItem && (!graph.activeDoc || graph.activeDoc.name !== docItem.name)) {
+    await switchActiveDocument(docItem, false);
+  }
+
+  const targetPage = sa.target_page || (sa.page_range && sa.page_range[0]) || 1;
+  setTimeout(() => {
+    jumpToOutlinePage(targetPage);
+  }, 160);
+};
+
 // 点击目录大纲平滑跳转并光效高亮目标页
 function jumpToOutlinePage(pageNum) {
   if (!currentPdfDoc) return;
   scrollToPage(pageNum, true);
 
-  // 光效高亮目标页 1.5 秒
   setTimeout(() => {
     const slot = document.getElementById(`pdf-slot-${pageNum}`);
     if (slot) {
@@ -2747,7 +3431,7 @@ window.extractSelectedToCanvas = () => {
   selectNode(newId);
   toolbar.style.display = 'none';
   window.getSelection()?.removeAllRanges();
-  updateStatus(`[已摘录] 事实素材已引入画布: ${citation}`);
+  updateStatus(`事实素材已成功引入画布: ${citation}`);
 };
 
 // 整篇文档或当前页一键存为实证节点
@@ -2817,7 +3501,7 @@ function setupPdfSnipper() {
       const scrollHeight = viewContainer ? viewContainer.scrollHeight : 2000;
       snipOverlay.style.height = `${scrollHeight}px`;
       snipOverlay.style.display = 'block';
-      updateStatus('✂️ 已开启框选模式：请用鼠标在论文公式或插图上按住左键拖拽拉框！');
+      updateStatus('已开启框选模式：请用鼠标在论文公式或插图上按住左键拖拽拉框');
     } else {
       btnSnip.style.background = 'rgba(245, 158, 11, 0.15)';
       btnSnip.style.color = '#fde68a';
@@ -2950,7 +3634,7 @@ function setupPdfSnipper() {
     selectNode(newId);
 
     toggleSnip(false);
-    updateStatus(`✂️ 已截取第 ${targetPageNum} 页原版公式/插图入图！正在由 Gemini 多模态自动提取 LaTeX 表达式...`);
+    updateStatus(`已截取第 ${targetPageNum} 页原版公式/插图入图，正在逆向提取 LaTeX 表达式...`);
 
     // 自动调用大模型多模态公式反编译与变量解析
     transcribeFormula(newNode, dataUrl, citation);
@@ -2976,7 +3660,7 @@ async function transcribeFormula(nodeOrId, imageUrl, citation) {
     renderNodes();
     if (selectedNodeId === nodeId) updateContextInspector();
   }
-  updateStatus(`⏳ 正在请求 Gemini 多模态视觉模型逆向提取公式与参数...`);
+  updateStatus(`正在请求视觉模型逆向提取公式与参数...`);
 
   try {
     const res = await fetch('/api/ocr-formula', {
@@ -2994,13 +3678,12 @@ async function transcribeFormula(nodeOrId, imageUrl, citation) {
         saveGraph();
         renderNodes();
         if (selectedNodeId === nodeId) updateContextInspector();
-        updateStatus(`✨ 已成功将【${citation}】反编译为标准 LaTeX 公式与物理释义！`);
+        updateStatus(`已成功将《${citation}》反编译为标准 LaTeX 公式与物理释义`);
       } else {
         targetNode.ocrStatus = 'failed';
         saveGraph();
         renderNodes();
-        if (selectedNodeId === nodeId) updateContextInspector();
-        updateStatus(`⚠️ 公式反编译未完成: ${data.error || '未能识别有效内容'}`);
+        updateStatus(`公式反编译未完成: ${data.error || '未能识别有效内容'}`);
         showEngineDiagnosticModal(data);
       }
     }
@@ -3013,7 +3696,7 @@ async function transcribeFormula(nodeOrId, imageUrl, citation) {
       renderNodes();
       if (selectedNodeId === nodeId) updateContextInspector();
     }
-    updateStatus(`⚠️ 网络连接或调用异常: ${err.message}`);
+    updateStatus(`网络连接或调用异常: ${err.message}`);
     showEngineDiagnosticModal({
       ok: false,
       error_type: 'network_error',
@@ -3083,8 +3766,8 @@ function renderSessionsList() {
       <div class="session-item-header">
         <span class="session-item-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</span>
         <div class="session-actions">
-          <button class="session-action-btn btn-rename" title="重命名课题">✏️</button>
-          <button class="session-action-btn btn-del" title="删除课题">🗑️</button>
+          <button class="session-action-btn btn-rename" title="重命名课题">改</button>
+          <button class="session-action-btn btn-del" title="删除课题">删</button>
         </div>
       </div>
       <div class="session-item-meta">
@@ -3290,6 +3973,9 @@ function setupEventListeners() {
   });
 
   container.addEventListener('click', (e) => {
+    if (!e.target.closest('.port-in-popover') && !e.target.closest('.port.in')) {
+      closePortPopover();
+    }
     if (e.target.closest('.node') || e.target.closest('.port') || e.target.closest('.zoom-controls') || e.target.closest('.edge-hitarea')) return;
     selectedNodeId = null;
     applyTopologyFocus(null);
@@ -3298,7 +3984,7 @@ function setupEventListeners() {
 
   let mouseMoveRaf = null;
   window.addEventListener('mousemove', (e) => {
-    if (!isPanning && !draggingNodeId && !connectingSourceId) return;
+    if (!isPanning && !draggingNodeId && !connectingSourceId && !unpluggingState) return;
 
     if (isPanning) {
       pan.x = e.clientX - startPan.x;
@@ -3317,6 +4003,16 @@ function setupEventListeners() {
       }
     } else if (connectingSourceId) {
       tempMousePos = screenToWorld(e.clientX, e.clientY);
+    } else if (unpluggingState) {
+      const dist = Math.hypot(e.clientX - unpluggingState.startClientX, e.clientY - unpluggingState.startClientY);
+      if (dist > 4) {
+        unpluggingState.isDragging = true;
+        tempMousePos = screenToWorld(e.clientX, e.clientY);
+        if (unpluggingState.pulledEdge) {
+          const origPath = svgEdges.querySelector(`.edge-path[data-edge-id="${unpluggingState.pulledEdge.id}"]`);
+          if (origPath) origPath.classList.add('unplugging');
+        }
+      }
     }
 
     if (!mouseMoveRaf) {
@@ -3334,6 +4030,8 @@ function setupEventListeners() {
           }
         } else if (connectingSourceId) {
           updateTempConnectingEdge();
+        } else if (unpluggingState && unpluggingState.isDragging) {
+          updateDisconnectingEdge();
         }
       });
     }
@@ -3352,13 +4050,18 @@ function setupEventListeners() {
       if (wasDragging) saveGraph();
     }
 
+    const rawTargetEl = (e.target && typeof e.target.closest === 'function')
+      ? e.target
+      : (typeof document.elementFromPoint === 'function' ? document.elementFromPoint(e.clientX, e.clientY) : null);
+
     if (connectingSourceId) {
-      const portIn = e.target.closest('.port.in');
+      const portIn = rawTargetEl?.closest('.port.in');
       if (portIn) {
         const targetId = portIn.dataset.node;
         if (targetId && targetId !== connectingSourceId) {
           const exists = graph.edges.some(edge => edge.source === connectingSourceId && edge.target === targetId);
           if (!exists) {
+            pushGraphHistory();
             graph.edges.push({
               id: `e_${Date.now()}`,
               source: connectingSourceId,
@@ -3375,10 +4078,100 @@ function setupEventListeners() {
       connectingSourceId = null;
       updateTempConnectingEdge();
     }
+
+    if (unpluggingState) {
+      const state = unpluggingState;
+      unpluggingState = null;
+      hideDisconnectingEdge();
+
+      if (state.isDragging) {
+        const dist = Math.hypot(e.clientX - state.startClientX, e.clientY - state.startClientY);
+        if (dist > 15) {
+          const dropPortIn = rawTargetEl?.closest('.port.in');
+          const dropPortOut = rawTargetEl?.closest('.port.out');
+          const dropNode = rawTargetEl?.closest('.node');
+
+          // 1. 拖到其他下游节点的输入端口：连线改接 (Rewire)
+          if (dropPortIn && state.pulledEdge) {
+            const newTargetId = dropPortIn.dataset.node;
+            if (newTargetId && newTargetId !== state.pulledEdge.source && newTargetId !== state.targetId) {
+              pushGraphHistory();
+              state.pulledEdge.target = newTargetId;
+              saveGraph();
+              renderEdges();
+              showToastNotification(`连线已成功改接到新下游节点`, () => undoGraph());
+              return;
+            }
+          }
+
+          // 2. 拖到特定上游节点或其输出端口：精准剪断该特定上游依赖
+          if (dropPortOut || (dropNode && dropNode.dataset.id !== state.targetId)) {
+            const sourceId = dropPortOut ? dropPortOut.dataset.node : dropNode.dataset.id;
+            const targetEdge = state.incoming.find(ed => ed.source === sourceId);
+            if (targetEdge) {
+              pushGraphHistory();
+              const sNode = graph.nodes.find(n => n.id === targetEdge.source);
+              const sTitle = sNode ? (sNode.title || sNode.id) : targetEdge.source;
+              deleteEdge(targetEdge.id);
+              showToastNotification(`已切除与【${escapeHtml(sTitle)}】的连线`, () => undoGraph());
+              return;
+            }
+          }
+
+          // 3. 甩到空白画布处松手：直接拔断！
+          if (state.pulledEdge) {
+            pushGraphHistory();
+            const sNode = graph.nodes.find(n => n.id === state.pulledEdge.source);
+            const sTitle = sNode ? (sNode.title || sNode.id) : state.pulledEdge.source;
+            deleteEdge(state.pulledEdge.id);
+            showToastNotification(`已从下游拔除并切断连线【${escapeHtml(sTitle)}】`, () => undoGraph());
+            return;
+          } else if (state.incoming.length > 1) {
+            // 多条入边：根据鼠标拖拽矢量方向切除最匹配的那根
+            const mouseWorld = screenToWorld(e.clientX, e.clientY);
+            let closestEdge = null;
+            let minDistance = Infinity;
+            for (const ed of state.incoming) {
+              const srcNode = graph.nodes.find(n => n.id === ed.source);
+              if (srcNode) {
+                const d = Math.hypot(srcNode.x - mouseWorld.x, srcNode.y - mouseWorld.y);
+                if (d < minDistance) {
+                  minDistance = d;
+                  closestEdge = ed;
+                }
+              }
+            }
+            if (closestEdge) {
+              pushGraphHistory();
+              const sNode = graph.nodes.find(n => n.id === closestEdge.source);
+              const sTitle = sNode ? (sNode.title || sNode.id) : closestEdge.source;
+              deleteEdge(closestEdge.id);
+              showToastNotification(`已根据拖拽方向拔除连线【${escapeHtml(sTitle)}】`, () => undoGraph());
+              return;
+            }
+          }
+        }
+        renderEdges();
+      } else {
+        // 用户仅仅是单击了 .port.in：呼出精致的快速断线菜单气泡！
+        renderEdges();
+        showPortInPopover(state.targetId, e.clientX, e.clientY);
+      }
+    }
   });
 
   // 滚轮分流：光标在卡片内容区时放行原生滚动；仅在画布空白区缩放 (GPU 硬件加速，零重绘)
   container.addEventListener('wheel', (e) => {
+    // 0. Shift + 滚轮 或在横向代码/反汇编容器上方：平滑驱动横向滚动 (优雅免拖滚动条)
+    if (e.shiftKey) {
+      const scrollableHoriz = e.target.closest('.code-pre, .disasm-box, .node-content');
+      if (scrollableHoriz) {
+        scrollableHoriz.scrollLeft += (e.deltaY || e.deltaX);
+        e.preventDefault();
+        return;
+      }
+    }
+
     // 1. 若光标处于卡片内容区上方，且未按住 Ctrl/Cmd 键强制缩放画布：
     // 直接放行给 Chromium 底层 Compositor 线程原生 120Hz 丝滑惯性滚动
     if (e.target.closest('.node-content') && !e.ctrlKey && !e.metaKey) {
@@ -3414,14 +4207,36 @@ function setupEventListeners() {
     updateZoomIndicator();
   }, { passive: false });
 
-  // 连线从输出端口触发
+  // 连线与下游断线触发
   container.addEventListener('mousedown', (e) => {
+    closePortPopover();
+
     const portOut = e.target.closest('.port.out');
     if (portOut) {
       connectingSourceId = portOut.dataset.node;
       tempMousePos = screenToWorld(e.clientX, e.clientY);
       updateTempConnectingEdge();
       e.stopPropagation();
+      return;
+    }
+
+    const portIn = e.target.closest('.port.in');
+    if (portIn) {
+      const targetId = portIn.dataset.node;
+      const incoming = (graph.edges || []).filter(edge => edge.target === targetId);
+
+      unpluggingState = {
+        targetId,
+        incoming,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        pulledEdge: incoming.length === 1 ? incoming[0] : null,
+        isDragging: false
+      };
+
+      tempMousePos = screenToWorld(e.clientX, e.clientY);
+      e.stopPropagation();
+      return;
     }
   });
 
@@ -3458,11 +4273,125 @@ function setupEventListeners() {
     updateStatus("已新建课题节点！请在右侧面板直接输入问题与标题。");
   };
 
-  const btnAddMaterial = document.getElementById('btn-add-material');
-  if (btnAddMaterial) btnAddMaterial.onclick = () => openDrawer('reader');
+  const btnAddCode = document.getElementById('btn-add-code');
+  if (btnAddCode) btnAddCode.onclick = () => openCodeModal();
+
+  const btnAddTracer = document.getElementById('btn-add-tracer');
+  if (btnAddTracer) {
+    btnAddTracer.onclick = () => {
+      const newId = `n_tracer_${Date.now()}`;
+      const screenCenter = screenToWorld(window.innerWidth / 3, window.innerHeight / 2.5);
+      graph.nodes.push({
+        id: newId,
+        kind: 'tracer',
+        tracer: 'socket_lifecycle',
+        title: '并发套接字生命周期单步器 (CS:APP 第 11 章)',
+        question: '探索多进程并发服务器下描述符拷贝、引用计数(refcnt)与四次挥手触发机理',
+        width: 740,
+        x: Math.max(40, screenCenter.x - 200),
+        y: Math.max(40, screenCenter.y - 120)
+      });
+      saveGraph();
+      renderNodes();
+      requestAnimationFrame(() => renderEdges());
+      selectNode(newId);
+      updateStatus("已创建微观系统沙盒卡片！");
+    };
+  }
+
+  const btnCloseCodeModal = document.getElementById('btn-close-code-modal');
+  if (btnCloseCodeModal) btnCloseCodeModal.onclick = () => closeCodeModal();
+
+  const btnCancelCodeModal = document.getElementById('btn-cancel-code-modal');
+  if (btnCancelCodeModal) btnCancelCodeModal.onclick = () => closeCodeModal();
+
+  const btnPasteClipboard = document.getElementById('btn-paste-clipboard');
+  if (btnPasteClipboard) {
+    btnPasteClipboard.onclick = async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        const contentInput = document.getElementById('code-modal-content');
+        if (contentInput && text) {
+          contentInput.value = text;
+          autoDetectCodeMeta(text);
+          updateStatus("已从剪贴板粘贴源码！");
+        }
+      } catch (err) {
+        alert("无法直接访问系统剪贴板，请使用 Ctrl+V 手动粘贴。");
+      }
+    };
+  }
+
+  const btnSubmitCodeModal = document.getElementById('btn-submit-code-modal');
+  if (btnSubmitCodeModal) {
+    btnSubmitCodeModal.onclick = () => {
+      const title = (document.getElementById('code-modal-title')?.value || '').trim();
+      const lang = (document.getElementById('code-modal-lang')?.value || 'c').trim();
+      const citation = (document.getElementById('code-modal-citation')?.value || '').trim();
+      const content = (document.getElementById('code-modal-content')?.value || '').trim();
+      const targetId = document.getElementById('code-modal-target-node')?.value;
+
+      if (!content) {
+        alert("请在输入框中填入或粘贴源码内容！");
+        return;
+      }
+
+      const newId = `n_code_${Date.now()}`;
+      const screenCenter = screenToWorld(window.innerWidth / 3, window.innerHeight / 2.5);
+
+      let x = Math.max(40, screenCenter.x - 180);
+      let y = Math.max(40, screenCenter.y - 100);
+
+      const targetNode = graph.nodes.find(n => n.id === targetId);
+      if (targetNode) {
+        x = Math.max(40, targetNode.x - 420);
+        y = targetNode.y;
+      }
+
+      const newNode = {
+        id: newId,
+        kind: 'source_code',
+        title: title || '源码公理实证片段',
+        language: lang,
+        code: content,
+        citation: citation,
+        status: 'idle',
+        x,
+        y,
+        createdAt: Date.now()
+      };
+
+      graph.nodes.push(newNode);
+
+      if (targetId && targetNode) {
+        graph.edges.push({
+          id: `e_${newId}_${targetId}`,
+          source: newId,
+          target: targetId,
+          kind: 'solid'
+        });
+      }
+
+      saveGraph();
+      renderNodes();
+      requestAnimationFrame(() => renderEdges());
+      selectNode(newId);
+      closeCodeModal();
+      updateStatus(`已创建源码实证卡片 #${newId}！`);
+    };
+  }
 
   const btnToggleReader = document.getElementById('btn-toggle-reader');
-  if (btnToggleReader) btnToggleReader.onclick = () => openDrawer('reader');
+  if (btnToggleReader) {
+    btnToggleReader.onclick = () => {
+      const isReaderOpen = drawer.classList.contains('open') && activeTab === 'reader';
+      if (isReaderOpen) {
+        closeDrawer();
+      } else {
+        openDrawer('reader');
+      }
+    };
+  }
 
   const btnResetDemo = document.getElementById('btn-reset-demo');
   if (btnResetDemo) {
@@ -3477,6 +4406,28 @@ function setupEventListeners() {
   // 模型与接口调度设置中心 (双引擎 & 服务商预设)
   // ==========================================
   const PROVIDER_PRESETS = {
+    localproxy: {
+      name: '本地反代',
+      api_base: 'http://127.0.0.1:8045/v1',
+      model: 'gemini-3.8-flash-high',
+      vision_model: 'gemini-3.8-flash-high',
+      hint: '服务商：本地 Antigravity 代理 · 自动探测本地端口，无需配置第三方 Key',
+      linkText: '',
+      linkUrl: '#',
+      defaultKey: 'sk-antigravity',
+      models: [
+        { id: 'gemini-3.8-flash-high', name: 'gemini-3.8-flash-high (Google 深度思考 · 推荐)' },
+        { id: 'gemini-3.1-pro', name: 'gemini-3.1-pro (长上下文/深度逻辑)' },
+        { id: 'gemini-2.5-flash', name: 'gemini-2.5-flash (极速响应)' },
+        { id: 'claude-3-5-sonnet-20241022', name: 'claude-3-5-sonnet (代码与系统架构)' },
+        { id: 'gpt-4o', name: 'gpt-4o (OpenAI 全模态旗舰)' }
+      ],
+      vision_models: [
+        { id: 'gemini-3.8-flash-high', name: 'gemini-3.8-flash-high (高精度 LaTeX 公式 OCR · 推荐)' },
+        { id: 'gemini-3.1-pro', name: 'gemini-3.1-pro (深度图表解析)' },
+        { id: 'gpt-4o', name: 'gpt-4o (视觉解析)' }
+      ]
+    },
     siliconflow: {
       name: '硅基流动',
       api_base: 'https://api.siliconflow.cn/v1',
@@ -3485,17 +4436,17 @@ function setupEventListeners() {
       hint: '服务商：硅基流动 · 适用 DeepSeek-V4 Pro (推理) + Qwen2.5-VL-72B (视觉)',
       linkText: 'cloud.siliconflow.cn ↗',
       linkUrl: 'https://cloud.siliconflow.cn/account/ak',
-      defaultKey: ''
-    },
-    deepseek: {
-      name: 'DeepSeek 官方',
-      api_base: 'https://api.deepseek.com/v1',
-      model: 'deepseek-chat',
-      vision_model: '',
-      hint: '服务商：DeepSeek 开放平台 · 适用 deepseek-chat / deepseek-reasoner',
-      linkText: 'platform.deepseek.com ↗',
-      linkUrl: 'https://platform.deepseek.com/api_keys',
-      defaultKey: ''
+      defaultKey: '',
+      models: [
+        { id: 'deepseek-ai/DeepSeek-V4-Pro', name: 'deepseek-ai/DeepSeek-V4-Pro (官方首选推演)' },
+        { id: 'deepseek-ai/DeepSeek-R1', name: 'deepseek-ai/DeepSeek-R1 (深度长思维链)' },
+        { id: 'deepseek-ai/DeepSeek-V3', name: 'deepseek-ai/DeepSeek-V3 (极速通用推理)' },
+        { id: 'Qwen/Qwen2.5-72B-Instruct', name: 'Qwen/Qwen2.5-72B-Instruct (通义千问开源旗舰)' }
+      ],
+      vision_models: [
+        { id: 'Qwen/Qwen2.5-VL-72B-Instruct', name: 'Qwen/Qwen2.5-VL-72B-Instruct (公式/插图解析 · 推荐)' },
+        { id: 'Pro/Qwen/Qwen2.5-VL-7B-Instruct', name: 'Pro/Qwen/Qwen2.5-VL-7B-Instruct (极速轻量)' }
+      ]
     },
     dashscope: {
       name: '阿里百炼',
@@ -3505,7 +4456,35 @@ function setupEventListeners() {
       hint: '服务商：阿里百炼 · 适用 Qwen3.8-Max (推理) + qwen-vl-max (视觉)',
       linkText: 'bailian.console.aliyun.com ↗',
       linkUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
-      defaultKey: ''
+      defaultKey: '',
+      models: [
+        { id: 'qwen3.8-max', name: 'qwen3.8-max (百炼最新学术旗舰)' },
+        { id: 'qwen-max', name: 'qwen-max (复杂学术长文)' },
+        { id: 'qwen-plus', name: 'qwen-plus (高性价比加速)' },
+        { id: 'deepseek-r1', name: 'deepseek-r1 (百炼托管 R1)' },
+        { id: 'deepseek-v3', name: 'deepseek-v3 (百炼托管 V3)' }
+      ],
+      vision_models: [
+        { id: 'qwen-vl-max', name: 'qwen-vl-max (旗舰视觉 OCR · 推荐)' },
+        { id: 'qwen-vl-plus', name: 'qwen-vl-plus (极速视觉)' }
+      ]
+    },
+    deepseek: {
+      name: 'DeepSeek 官方',
+      api_base: 'https://api.deepseek.com/v1',
+      model: 'deepseek-chat',
+      vision_model: '',
+      hint: '服务商：DeepSeek 开放平台 · 适用 deepseek-chat / deepseek-reasoner',
+      linkText: 'platform.deepseek.com ↗',
+      linkUrl: 'https://platform.deepseek.com/api_keys',
+      defaultKey: '',
+      models: [
+        { id: 'deepseek-chat', name: 'deepseek-chat (DeepSeek-V3 极速通用)' },
+        { id: 'deepseek-reasoner', name: 'deepseek-reasoner (DeepSeek-R1 深度长思维链)' }
+      ],
+      vision_models: [
+        { id: '', name: '自动回退 (DeepSeek 官方无多模态，由主引擎/本地代理处理)' }
+      ]
     },
     custom_proxy: {
       name: '中转反代',
@@ -3515,17 +4494,16 @@ function setupEventListeners() {
       hint: '服务商：自定义反代/中转站 · 支持任意 OpenAI 兼容云端中转 API',
       linkText: '反代配置指南 ↗',
       linkUrl: 'https://github.com/Shengxuan2513/AxiomFlow',
-      defaultKey: ''
-    },
-    oneapi: {
-      name: '本地网关',
-      api_base: 'http://127.0.0.1:3000/v1',
-      model: 'gpt-4o',
-      vision_model: 'gpt-4o',
-      hint: '服务商：本地 OneAPI / NewAPI / 本地网关 (默认端口 3000)',
-      linkText: '',
-      linkUrl: '#',
-      defaultKey: ''
+      defaultKey: '',
+      models: [
+        { id: 'deepseek-chat', name: 'deepseek-chat (通用推理)' },
+        { id: 'deepseek-reasoner', name: 'deepseek-reasoner (深度长思考)' },
+        { id: 'gpt-4o', name: 'gpt-4o (OpenAI 旗舰)' },
+        { id: 'claude-3-5-sonnet-20241022', name: 'claude-3-5-sonnet (Claude 架构)' }
+      ],
+      vision_models: [
+        { id: 'gpt-4o', name: 'gpt-4o (视觉 OCR)' }
+      ]
     },
     openai: {
       name: 'OpenAI 官方',
@@ -3535,7 +4513,17 @@ function setupEventListeners() {
       hint: '服务商：OpenAI 官方 · 适用 GPT-4o / o1 / o3-mini',
       linkText: 'platform.openai.com ↗',
       linkUrl: 'https://platform.openai.com/api-keys',
-      defaultKey: ''
+      defaultKey: '',
+      models: [
+        { id: 'gpt-4o', name: 'gpt-4o (全能旗舰 · 推荐)' },
+        { id: 'gpt-4o-mini', name: 'gpt-4o-mini (轻量极速)' },
+        { id: 'o1', name: 'o1 (长思维链高难度推理)' },
+        { id: 'o3-mini', name: 'o3-mini (数理逻辑极速推理)' }
+      ],
+      vision_models: [
+        { id: 'gpt-4o', name: 'gpt-4o (高精度视觉 OCR · 推荐)' },
+        { id: 'gpt-4o-mini', name: 'gpt-4o-mini (轻量视觉)' }
+      ]
     }
   };
 
@@ -3554,7 +4542,81 @@ function setupEventListeners() {
     localStorage.setItem('axiomflow_provider_keys', JSON.stringify(keys));
   }
 
-  let currentActiveProvider = 'siliconflow';
+  let currentActiveProvider = 'localproxy';
+
+  // 专属服务商模型下拉渲染引擎
+  function populateModelOptions(pKey, targetModel, targetVision, fetchedOnlineModels = null) {
+    const preset = PROVIDER_PRESETS[pKey] || PROVIDER_PRESETS.localproxy;
+    const modelSelect = document.getElementById('cfg-model-select');
+    const visionSelect = document.getElementById('cfg-vision-model-select');
+    const modelBadge = document.getElementById('cfg-model-badge');
+    const customBox = document.getElementById('cfg-custom-model-box');
+    const customInput = document.getElementById('cfg-custom-model-input');
+
+    if (modelBadge) {
+      modelBadge.innerText = `${preset.name} 专属模型库`;
+    }
+
+    if (modelSelect) {
+      let html = '';
+      
+      // 1. 服务商专属官方推荐模型
+      html += `<optgroup label="${preset.name} 推荐模型">`;
+      (preset.models || []).forEach(m => {
+        html += `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`;
+      });
+      html += `</optgroup>`;
+
+      // 2. 在线探测发现的实时模型 (若有)
+      if (fetchedOnlineModels && fetchedOnlineModels.length > 0) {
+        html += `<optgroup label="在线探测发现模型 (${fetchedOnlineModels.length} 个)">`;
+        fetchedOnlineModels.forEach(mid => {
+          html += `<option value="${escapeHtml(mid)}">${escapeHtml(mid)}</option>`;
+        });
+        html += `</optgroup>`;
+      }
+
+      // 3. 自定义输入兜底
+      html += `<optgroup label="自定义输入">
+        <option value="__custom__">自定义模型名称...</option>
+      </optgroup>`;
+
+      modelSelect.innerHTML = html;
+
+      // 选中项智能匹配
+      const wantModel = targetModel || preset.model;
+      let matched = false;
+      for (const opt of modelSelect.options) {
+        if (opt.value === wantModel) {
+          modelSelect.value = wantModel;
+          matched = true;
+          break;
+        }
+      }
+      if (matched) {
+        if (customBox) customBox.style.display = 'none';
+      } else {
+        modelSelect.value = '__custom__';
+        if (customBox) customBox.style.display = 'block';
+        if (customInput) customInput.value = wantModel;
+      }
+    }
+
+    if (visionSelect) {
+      let vHtml = `<option value="">自动路由 (根据主模型与服务商自适应)</option>`;
+      if (preset.vision_models && preset.vision_models.length > 0) {
+        vHtml += `<optgroup label="${preset.name} 推荐多模态视觉">`;
+        preset.vision_models.forEach(vm => {
+          if (vm.id) {
+            vHtml += `<option value="${escapeHtml(vm.id)}">${escapeHtml(vm.name)}</option>`;
+          }
+        });
+        vHtml += `</optgroup>`;
+      }
+      visionSelect.innerHTML = vHtml;
+      visionSelect.value = targetVision !== undefined ? targetVision : (preset.vision_model || '');
+    }
+  }
 
   function updatePresetButtonsState(api_base) {
     const cleanBase = (api_base || '').trim().replace(/\/+$/, '');
@@ -3737,32 +4799,8 @@ function setupEventListeners() {
         }
       }
 
-      const modelSelect = document.getElementById('cfg-model-select');
-      const customBox = document.getElementById('cfg-custom-model-box');
-      const customInput = document.getElementById('cfg-custom-model-input');
-
-      let hasOption = false;
-      if (modelSelect) {
-        for (const opt of modelSelect.options) {
-          if (opt.value === preset.model) {
-            hasOption = true;
-            break;
-          }
-        }
-        if (hasOption) {
-          modelSelect.value = preset.model;
-          if (customBox) customBox.style.display = 'none';
-        } else {
-          modelSelect.value = '__custom__';
-          if (customBox) customBox.style.display = 'block';
-          if (customInput) customInput.value = preset.model;
-        }
-      }
-
-      const visionSelect = document.getElementById('cfg-vision-model-select');
-      if (visionSelect) {
-        visionSelect.value = preset.vision_model || '';
-      }
+      // 动态适配该服务商专属模型目录
+      populateModelOptions(pKey, preset.model, preset.vision_model);
 
       // 重置连通性状态框
       const testStatusEl = document.getElementById('cfg-test-status');
@@ -3800,12 +4838,66 @@ function setupEventListeners() {
     };
   }
 
+  // 温度采样语义提示
+  const updateTempSemanticHint = (v) => {
+    const hintEl = document.getElementById('cfg-temp-hint');
+    const val = parseFloat(v);
+    if (!hintEl) return;
+    if (val <= 0.15) {
+      hintEl.innerText = '严格确定性证明 (代码/数学贪心采样)';
+      hintEl.style.color = '#38bdf8';
+    } else if (val <= 0.45) {
+      hintEl.innerText = '均衡学术论证 (默认推荐)';
+      hintEl.style.color = '#34d399';
+    } else {
+      hintEl.innerText = '启发式发散探索 (高创造性)';
+      hintEl.style.color = '#f59e0b';
+    }
+  };
+
   // 温度滑块与数值显示联动
   const tempSlider = document.getElementById('cfg-temperature');
   const tempVal = document.getElementById('cfg-temp-value');
   if (tempSlider && tempVal) {
     tempSlider.oninput = () => {
       tempVal.innerText = tempSlider.value;
+      updateTempSemanticHint(tempSlider.value);
+    };
+  }
+
+  // 探测在线模型按钮
+  const btnFetchModels = document.getElementById('btn-fetch-models');
+  if (btnFetchModels) {
+    btnFetchModels.onclick = async () => {
+      const api_base = (document.getElementById('cfg-api-base')?.value || '').trim();
+      const api_key = (document.getElementById('cfg-api-key')?.value || '').trim() || currentConfig.api_key || '';
+      if (!api_base) {
+        alert("请先填写接口基址 (API Base)");
+        return;
+      }
+      btnFetchModels.disabled = true;
+      btnFetchModels.innerText = '探测中...';
+      try {
+        const res = await fetch('/api/fetch-models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_base, api_key })
+        });
+        const data = await res.json();
+        if (data.ok && data.models && data.models.length > 0) {
+          const curModel = modelSelectEl ? modelSelectEl.value : currentConfig.model;
+          const curVision = document.getElementById('cfg-vision-model-select')?.value || currentConfig.vision_model;
+          populateModelOptions(currentActiveProvider, curModel, curVision, data.models);
+          updateStatus(`探测成功，已拉取 ${data.models.length} 个在线模型`);
+        } else {
+          alert(`未能自动获取模型列表: ${data.error || '远端未开放 /v1/models 标准接口'}`);
+        }
+      } catch (err) {
+        alert(`探测请求异常: ${err.message}`);
+      } finally {
+        btnFetchModels.disabled = false;
+        btnFetchModels.innerText = '探测在线模型';
+      }
     };
   }
 
@@ -3816,7 +4908,7 @@ function setupEventListeners() {
     btnToggleKey.onclick = () => {
       const isPassword = apiKeyInput.type === 'password';
       apiKeyInput.type = isPassword ? 'text' : 'password';
-      btnToggleKey.innerText = isPassword ? '🙈' : '👁️';
+      btnToggleKey.innerText = isPassword ? '显' : '隐';
     };
   }
 
@@ -3826,11 +4918,12 @@ function setupEventListeners() {
   if (btnTestConn && testStatusEl) {
     btnTestConn.onclick = async () => {
       const api_base = document.getElementById('cfg-api-base').value.trim();
-      let model = modelSelectEl ? modelSelectEl.value : 'deepseek-ai/DeepSeek-V4-Pro';
+      let model = modelSelectEl ? modelSelectEl.value : 'gemini-3.8-flash-high';
       if (model === '__custom__') {
-        model = (customInputEl?.value || '').trim() || 'deepseek-ai/DeepSeek-V4-Pro';
+        model = (customInputEl?.value || '').trim() || 'gemini-3.8-flash-high';
       }
       const api_key = (apiKeyInput?.value || '').trim() || currentConfig.api_key || '';
+      const temperature = parseFloat(tempSlider?.value || '0.3');
 
       if (!api_base) {
         alert("请输入接口基址 (API Base)");
@@ -3838,26 +4931,25 @@ function setupEventListeners() {
       }
 
       btnTestConn.disabled = true;
-      btnTestConn.innerHTML = '<span>⏳ 探测中...</span>';
+      btnTestConn.innerHTML = '<span>探测中...</span>';
       testStatusEl.style.display = 'block';
       testStatusEl.style.background = 'rgba(99, 102, 241, 0.12)';
       testStatusEl.style.border = '1px solid rgba(99, 102, 241, 0.3)';
       testStatusEl.style.color = '#c7d2fe';
-      testStatusEl.innerText = `⏳ 正在向 ${api_base} 发送探测请求 (模型: ${model})...`;
+      testStatusEl.innerText = `正在向 ${api_base} 发送探测请求 (模型: ${model}, 采样温度: ${temperature})...`;
 
       try {
         const res = await fetch('/api/test-connection', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_base, api_key, model })
+          body: JSON.stringify({ api_base, api_key, model, temperature })
         });
         const data = await res.json();
         if (data.ok) {
           testStatusEl.style.background = 'rgba(16, 185, 129, 0.12)';
           testStatusEl.style.border = '1px solid rgba(16, 185, 129, 0.4)';
           testStatusEl.style.color = '#34d399';
-          testStatusEl.innerText = `✅ ${data.message}`;
-          // 连通成功顺便记忆 Key
+          testStatusEl.innerText = `${data.message} (实测采样温度: ${temperature})`;
           if (api_key && currentActiveProvider) {
             saveProviderKey(currentActiveProvider, api_key);
             updateProviderHintBar(currentActiveProvider);
@@ -3866,36 +4958,37 @@ function setupEventListeners() {
           testStatusEl.style.background = 'rgba(239, 68, 68, 0.12)';
           testStatusEl.style.border = '1px solid rgba(239, 68, 68, 0.4)';
           testStatusEl.style.color = '#f87171';
-          testStatusEl.innerText = `❌ ${data.error}`;
+          testStatusEl.innerText = data.error;
         }
       } catch (err) {
         testStatusEl.style.background = 'rgba(239, 68, 68, 0.12)';
         testStatusEl.style.border = '1px solid rgba(239, 68, 68, 0.4)';
         testStatusEl.style.color = '#f87171';
-        testStatusEl.innerText = `❌ 请求异常: ${err.message}`;
+        testStatusEl.innerText = `请求异常: ${err.message}`;
       } finally {
         btnTestConn.disabled = false;
-        btnTestConn.innerHTML = '<span>⚡ 测试连接</span>';
+        btnTestConn.innerHTML = '<span>测试连接</span>';
       }
     };
   }
 
   // 打开设置弹窗
   const openSettingsHandler = () => {
-    const apiBase = currentConfig.api_base || 'https://api.siliconflow.cn/v1';
+    const apiBase = currentConfig.api_base || 'http://127.0.0.1:8045/v1';
     document.getElementById('cfg-api-base').value = apiBase;
 
-    // 智能恢复 Key
+    // 智能识别服务商
+    let matchedPKey = 'localproxy';
+    for (const [pk, p] of Object.entries(PROVIDER_PRESETS)) {
+      if (apiBase.includes(p.api_base.replace(/\/+$/, ''))) {
+        matchedPKey = pk;
+        break;
+      }
+    }
+    currentActiveProvider = matchedPKey;
+
     const savedKeys = getSavedProviderKeys();
     if (apiKeyInput) {
-      let matchedPKey = 'siliconflow';
-      for (const [pk, p] of Object.entries(PROVIDER_PRESETS)) {
-        if (apiBase.includes(p.api_base.replace(/\/+$/, ''))) {
-          matchedPKey = pk;
-          break;
-        }
-      }
-      currentActiveProvider = matchedPKey;
       if (savedKeys[matchedPKey]) {
         apiKeyInput.value = savedKeys[matchedPKey];
       } else if (currentConfig.api_key && currentConfig.api_key !== 'sk-antigravity') {
@@ -3907,37 +5000,17 @@ function setupEventListeners() {
       }
     }
 
-    // 渲染主模型
-    const model = currentConfig.model || 'deepseek-ai/DeepSeek-V4-Pro';
-    let hasOption = false;
-    if (modelSelectEl) {
-      for (const opt of modelSelectEl.options) {
-        if (opt.value === model) {
-          hasOption = true;
-          break;
-        }
-      }
-      if (hasOption) {
-        modelSelectEl.value = model;
-        if (customBoxEl) customBoxEl.style.display = 'none';
-      } else {
-        modelSelectEl.value = '__custom__';
-        if (customBoxEl) customBoxEl.style.display = 'block';
-        if (customInputEl) customInputEl.value = model;
-      }
-    }
+    // 动态渲染专属模型
+    const model = currentConfig.model || 'gemini-3.8-flash-high';
+    const vision = currentConfig.vision_model || '';
+    populateModelOptions(matchedPKey, model, vision);
 
-    // 渲染视觉模型
-    const visionSelect = document.getElementById('cfg-vision-model-select');
-    if (visionSelect) {
-      visionSelect.value = currentConfig.vision_model || '';
-    }
-
-    // 渲染温度
+    // 渲染温度与语义提示
     if (tempSlider && tempVal) {
       const t = currentConfig.temperature !== undefined ? currentConfig.temperature : 0.3;
       tempSlider.value = t;
       tempVal.innerText = t;
+      updateTempSemanticHint(t);
     }
 
     if (testStatusEl) testStatusEl.style.display = 'none';
@@ -4003,7 +5076,7 @@ function setupEventListeners() {
   });
 
   document.getElementById('btn-close-drawer').onclick = () => {
-    drawer.classList.remove('open');
+    closeDrawer();
   };
 
   // 缩放控制按钮
@@ -4037,13 +5110,37 @@ function setupEventListeners() {
     zoomLayoutBtn.onclick = () => applySugiyamaLayout(true);
   }
 
-  // 概念追问弹窗控制
+  // 概念追问与邻域研读弹窗控制
   const btnCloseInquiry = document.getElementById('btn-close-inquiry');
-  if (btnCloseInquiry) btnCloseInquiry.onclick = () => { inquiryModal.style.display = 'none'; };
+  if (btnCloseInquiry) btnCloseInquiry.onclick = () => {
+    inquiryModal.style.display = 'none';
+    neighborhoodActiveContext = null;
+    const banner = document.getElementById('inquiry-neighborhood-banner');
+    if (banner) banner.style.display = 'none';
+  };
   const btnCancelInquiry = document.getElementById('btn-cancel-inquiry');
-  if (btnCancelInquiry) btnCancelInquiry.onclick = () => { inquiryModal.style.display = 'none'; };
+  if (btnCancelInquiry) btnCancelInquiry.onclick = () => {
+    inquiryModal.style.display = 'none';
+    neighborhoodActiveContext = null;
+    const banner = document.getElementById('inquiry-neighborhood-banner');
+    if (banner) banner.style.display = 'none';
+  };
   const btnSubmitInquiry = document.getElementById('btn-submit-inquiry');
   if (btnSubmitInquiry) btnSubmitInquiry.onclick = () => { submitConceptInquiry(); };
+
+  // 顶栏与大纲中的邻域研读与AI骨架触发器
+  const btnNeighborhoodProbe = document.getElementById('btn-neighborhood-probe');
+  if (btnNeighborhoodProbe) {
+    btnNeighborhoodProbe.onclick = () => {
+      openNeighborhoodInquiry(currentPdfPageNum, null);
+    };
+  }
+  const btnAiOutline = document.getElementById('btn-ai-outline');
+  if (btnAiOutline) {
+    btnAiOutline.onclick = () => {
+      requestAiOutline(true);
+    };
+  }
 
   // 全屏卡片阅读弹窗控制
   const cardModal = document.getElementById('card-modal');
@@ -4074,18 +5171,218 @@ function setupEventListeners() {
 
   // 全局快捷键与 Esc 键
   window.addEventListener('keydown', (e) => {
+    // 全局 Ctrl+Z / Cmd+Z 撤销（非输入框内生效）
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+      const activeEl = document.activeElement;
+      if (!activeEl || (activeEl.tagName !== 'INPUT' && activeEl.tagName !== 'TEXTAREA' && !activeEl.isContentEditable)) {
+        e.preventDefault();
+        undoGraph();
+        return;
+      }
+    }
+
     if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
       e.preventDefault();
       toggleSidebar();
     }
+    if (e.altKey && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault();
+      openCodeModal();
+    }
     if (e.key === 'Escape') {
+      closePortPopover();
+      if (unpluggingState) {
+        unpluggingState = null;
+        hideDisconnectingEdge();
+        renderEdges();
+      }
+      if (connectingSourceId) {
+        connectingSourceId = null;
+        updateTempConnectingEdge();
+      }
       const sidebar = document.getElementById('sidebar-sessions');
       if (sidebar && sidebar.classList.contains('open')) closeSidebar();
       if (cardModal && cardModal.style.display === 'flex') cardModal.style.display = 'none';
       if (inquiryModal && inquiryModal.style.display === 'flex') inquiryModal.style.display = 'none';
       if (settingsModal && settingsModal.style.display === 'flex') settingsModal.style.display = 'none';
+      const codeModal = document.getElementById('code-modal');
+      if (codeModal && codeModal.style.display === 'flex') closeCodeModal();
     }
   });
+}
+
+// 下游流入端口快速断线与依赖管理气泡
+function showPortInPopover(targetId, clientX, clientY) {
+  closePortPopover();
+
+  const targetNode = graph.nodes.find(n => n.id === targetId);
+  if (!targetNode) return;
+
+  const incoming = (graph.edges || []).filter(e => e.target === targetId);
+  const popover = document.createElement('div');
+  popover.className = 'port-in-popover';
+  popover.id = 'port-in-popover';
+
+  if (incoming.length === 0) {
+    popover.innerHTML = `
+      <div class="port-in-popover-title">
+        <span>流入上下文</span>
+        <button class="popover-close-btn" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;">✕</button>
+      </div>
+      <div style="font-size: 11.5px; color: #94a3b8; padding: 4px 6px;">该节点暂无流入依赖。<br>可从上游节点右侧端口拖线接入。</div>
+    `;
+  } else {
+    let itemsHtml = '';
+    incoming.forEach(ed => {
+      const srcNode = graph.nodes.find(n => n.id === ed.source);
+      const srcTitle = srcNode ? (srcNode.title || srcNode.id) : ed.source;
+      itemsHtml += `
+        <div class="port-in-popover-item" data-edge-id="${ed.id}">
+          <span style="font-size: 11.5px; color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;" title="${escapeHtml(srcTitle)}">
+            ${escapeHtml(srcTitle)}
+          </span>
+          <button class="btn-cut" data-edge-id="${ed.id}">剪断</button>
+        </div>
+      `;
+    });
+
+    const cutAllBtn = incoming.length > 1 ? `
+      <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08); text-align: right;">
+        <button id="btn-popover-cut-all" style="background: rgba(244,63,94,0.15); border: 1px solid rgba(244,63,94,0.4); color: #f43f5e; font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer;">✕ 剪断全部流入依赖</button>
+      </div>
+    ` : '';
+
+    popover.innerHTML = `
+      <div class="port-in-popover-title">
+        <span>流入依赖 (${incoming.length} 条)</span>
+        <button class="popover-close-btn" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;">✕</button>
+      </div>
+      <div class="port-in-popover-list">
+        ${itemsHtml}
+      </div>
+      ${cutAllBtn}
+    `;
+  }
+
+  document.body.appendChild(popover);
+
+  // 计算自适应居中或对齐位置
+  const rect = popover.getBoundingClientRect();
+  let left = clientX - rect.width - 14;
+  let top = clientY - rect.height / 2;
+  if (left < 10) left = clientX + 20;
+  if (top < 10) top = 10;
+  if (top + rect.height > window.innerHeight - 10) top = window.innerHeight - rect.height - 10;
+
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+
+  // 绑定关闭与剪切操作
+  popover.querySelector('.popover-close-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closePortPopover();
+  });
+
+  popover.querySelectorAll('.btn-cut, .port-in-popover-item').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const edgeId = el.dataset.edgeId;
+      if (edgeId) {
+        const ed = (graph.edges || []).find(x => x.id === edgeId);
+        const sNode = ed ? graph.nodes.find(n => n.id === ed.source) : null;
+        const sTitle = sNode ? (sNode.title || sNode.id) : '上游';
+        pushGraphHistory();
+        deleteEdge(edgeId);
+        closePortPopover();
+        showToastNotification(`已剪断与【${escapeHtml(sTitle)}】的依赖连线`, () => undoGraph());
+      }
+    });
+  });
+
+  const btnCutAll = popover.querySelector('#btn-popover-cut-all');
+  if (btnCutAll) {
+    btnCutAll.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pushGraphHistory();
+      const edgesToDelete = incoming.map(ed => ed.id);
+      edgesToDelete.forEach(id => deleteEdge(id));
+      closePortPopover();
+      showToastNotification(`已剪断该节点的全部 ${edgesToDelete.length} 条流入依赖`, () => undoGraph());
+    });
+  }
+}
+
+function closePortPopover() {
+  const p = document.getElementById('port-in-popover');
+  if (p) p.remove();
+}
+
+function openCodeModal() {
+  const modal = document.getElementById('code-modal');
+  if (!modal) return;
+  const titleInput = document.getElementById('code-modal-title');
+  const citationInput = document.getElementById('code-modal-citation');
+  const contentInput = document.getElementById('code-modal-content');
+  const targetSelect = document.getElementById('code-modal-target-node');
+  
+  if (titleInput) titleInput.value = '';
+  if (citationInput) citationInput.value = '';
+  if (contentInput) contentInput.value = '';
+
+  if (targetSelect) {
+    targetSelect.innerHTML = '<option value="">(暂不连线，作为独立公理实证卡片入图)</option>';
+    graph.nodes.forEach(n => {
+      if (n.kind === 'question' || n.kind === 'conclusion') {
+        const opt = document.createElement('option');
+        opt.value = n.id;
+        opt.innerText = n.title || n.question || n.id;
+        if (n.id === selectedNodeId) opt.selected = true;
+        targetSelect.appendChild(opt);
+      }
+    });
+  }
+
+  // 尝试自动读取系统剪贴板
+  if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+    navigator.clipboard.readText().then(clipText => {
+      if (clipText && clipText.trim() && contentInput && !contentInput.value) {
+        contentInput.value = clipText.trim();
+        autoDetectCodeMeta(clipText.trim());
+      }
+    }).catch(() => {});
+  }
+
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    if (contentInput && contentInput.value) {
+      if (titleInput) titleInput.focus();
+    } else if (contentInput) {
+      contentInput.focus();
+    }
+  }, 60);
+}
+
+function closeCodeModal() {
+  const modal = document.getElementById('code-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function autoDetectCodeMeta(text) {
+  const titleInput = document.getElementById('code-modal-title');
+  const citationInput = document.getElementById('code-modal-citation');
+  const langSelect = document.getElementById('code-modal-lang');
+
+  if (/void\s+eval\b|fork\(\)|sigprocmask|setpgid/i.test(text)) {
+    if (titleInput && !titleInput.value) titleInput.value = 'CS:APP eval() 进程组与信号掩码实现';
+    if (citationInput && !citationInput.value) citationInput.value = 'CS:APP3e 第 8.5.6 节 p.534 (csapp/eval.c)';
+    if (langSelect) langSelect.value = 'c';
+  } else if (/%rax|movq|pushq|callq|\$0x/i.test(text)) {
+    if (titleInput && !titleInput.value) titleInput.value = 'x86-64 汇编指令流片段';
+    if (langSelect) langSelect.value = 'assembly';
+  } else if (/def\s+\w+\(|import\s+\w+/i.test(text)) {
+    if (titleInput && !titleInput.value) titleInput.value = 'Python 算法实现片段';
+    if (langSelect) langSelect.value = 'python';
+  }
 }
 
 // 初始化划词快捷工具栏 (划线复制、追问概念、存为实证)
@@ -4151,7 +5448,7 @@ function initSelectionToolbar() {
       toolbar.style.left = `${posX}px`;
       toolbar.style.top = `${posY}px`;
 
-      btnCopy.innerHTML = `<span class="sel-icon">📋</span> 复制`;
+      btnCopy.innerText = '复制';
       btnCopy.classList.remove('copied');
     } catch (e) {
       toolbar.style.display = 'none';
@@ -4199,7 +5496,7 @@ function initSelectionToolbar() {
       }
     }
 
-    btnCopy.innerHTML = `<span class="sel-icon">✓</span> 已复制!`;
+    btnCopy.innerText = '已复制';
     btnCopy.classList.add('copied');
     updateStatus(`已划线复制 ${currentSelectionText.length} 字到剪贴板`);
     setTimeout(() => {
@@ -4298,7 +5595,10 @@ function openCardFullscreen(node) {
   const kindNames = {
     material: '文献实证',
     question: '探索课题',
-    conclusion: '综合结论'
+    conclusion: '综合结论',
+    source_code: '源码实证',
+    hardware_probe: '硬件探针',
+    tracer: '微观沙盒'
   };
 
   const badgeEl = document.getElementById('modal-card-badge');
@@ -4314,8 +5614,55 @@ function openCardFullscreen(node) {
       <blockquote style="font-size: 15px; line-height: 1.8; color: #a7f3d0; border-left: 4px solid #34d399; padding-left: 14px; background: rgba(16, 185, 129, 0.08); border-radius: 0 8px 8px 0;">
         ${renderMarkdown(node.excerpt || node.content || '')}
       </blockquote>
-      ${node.citation ? `<div class="citation-chip" style="margin-top: 16px; font-size: 12.5px; padding: 4px 12px;">📖 证据出处: ${escapeHtml(node.citation)}</div>` : ''}
+      ${node.citation ? `<div class="citation-chip" style="margin-top: 16px; font-size: 12.5px; padding: 4px 12px;">证据出处: ${escapeHtml(node.citation)}</div>` : ''}
     `;
+  } else if (node.kind === 'source_code') {
+    bodyEl.innerHTML = `
+      <div class="code-block-wrapper" style="margin-top: 0;">
+        <div class="code-block-header">
+          <span class="code-lang-tag">${escapeHtml((node.language || 'c').toUpperCase())}</span>
+          <button class="code-copy-btn" onclick="copySnippetText('${node.id}', event)">复制代码片段</button>
+        </div>
+        <pre class="code-pre" style="max-height: 480px; font-size: 13px;">${highlightCode(node.code || node.content || '', node.language || 'c')}</pre>
+      </div>
+      ${node.citation ? `<div class="citation-chip" style="margin-top: 16px; font-size: 12.5px; padding: 4px 12px;">源码出处: ${escapeHtml(node.citation)}</div>` : ''}
+    `;
+  } else if (node.kind === 'hardware_probe') {
+    bodyEl.innerHTML = `
+      ${node.location ? `<div class="probe-loc-badge" style="font-size: 13px; padding: 4px 10px; margin-bottom: 14px;">断点源码位置: ${escapeHtml(node.location)}</div>` : ''}
+      <div style="margin-bottom: 14px;">
+        <div class="probe-grid-label" style="font-size: 12px; margin-bottom: 6px;">16 个通用寄存器物理状态 (x86-64)</div>
+        <div class="reg-grid" style="grid-template-columns: repeat(4, 1fr); padding: 10px; gap: 8px;">
+          ${renderRegistersHtml(node.registers)}
+        </div>
+      </div>
+      ${node.disassembly ? `
+        <div style="margin-bottom: 14px;">
+          <div class="probe-grid-label" style="font-size: 12px; margin-bottom: 6px;">反汇编指令流 ($pc)</div>
+          <div class="disasm-box" style="max-height: 220px; font-size: 12px;">${formatDisassemblyHtml(node.disassembly)}</div>
+        </div>
+      ` : ''}
+      ${node.stack ? `
+        <div style="margin-bottom: 14px;">
+          <div class="probe-grid-label" style="font-size: 12px; margin-bottom: 6px;">栈顶物理内存 Dump ($rsp)</div>
+          <pre class="code-pre" style="max-height: 180px; font-size: 11.5px; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 8px;">${escapeHtml(String(node.stack).replace(/\\r\\n|\\n|\\r/g, '\n'))}</pre>
+        </div>
+      ` : ''}
+      ${node.notes ? `<div style="font-size: 12.5px; color: #94a3b8; font-style: italic; margin-top: 10px;">调试断点备注: ${escapeHtml(node.notes)}</div>` : ''}
+    `;
+  } else if (node.kind === 'tracer') {
+    bodyEl.innerHTML = `<div class="tracer-fullscreen-host" id="modal-tracer-host"></div>`;
+    const host = document.getElementById('modal-tracer-host');
+    const tracerName = node.tracer || 'socket_lifecycle';
+    import(`/tracers/${tracerName}.js?t=${Date.now()}`)
+      .then(mod => {
+        if (mod && typeof mod.mountTracer === 'function') {
+          mod.mountTracer(host, node.params || {});
+        }
+      })
+      .catch(err => {
+        host.innerHTML = `<div style="padding: 12px; color: #ef4444; font-size: 12px;">沙盒模块加载失败: ${escapeHtml(err.message)}</div>`;
+      });
   } else {
     bodyEl.innerHTML = `
       <div style="background: rgba(99, 102, 241, 0.08); border-left: 4px solid #6366f1; border-radius: 0 8px 8px 0; padding: 14px 18px; margin-bottom: 20px;">
@@ -4346,6 +5693,8 @@ function openCardFullscreen(node) {
     const fullText = `# ${node.title || node.id}\n\n` +
       (node.question ? `**课题问题**: ${node.question}\n\n` : '') +
       (node.excerpt ? `> ${node.excerpt}\n\n出处: ${node.citation || ''}\n\n` : '') +
+      (node.code ? `\`\`\`${node.language || 'c'}\n${node.code}\n\`\`\`\n\n出处: ${node.citation || ''}\n\n` : '') +
+      (node.disassembly ? `### 反汇编\n\`\`\`assembly\n${node.disassembly}\n\`\`\`\n\n` : '') +
       (node.response ? `### 推演结论\n\n${node.response}` : '');
     navigator.clipboard.writeText(fullText);
     alert("已将卡片 Markdown 全文复制到剪贴板！");
@@ -4363,10 +5712,12 @@ function applySugiyamaLayout(autoFit = true) {
   updateStatus("正在执行 Sugiyama 拓扑自动分层排布...");
 
   const domHeightsMap = {};
+  const domWidthsMap = {};
   graph.nodes.forEach(n => {
     const el = document.querySelector(`.node[data-id="${n.id}"]`);
     if (el) {
       domHeightsMap[n.id] = el.offsetHeight;
+      domWidthsMap[n.id] = el.offsetWidth;
     }
   });
 
@@ -4376,7 +5727,8 @@ function applySugiyamaLayout(autoFit = true) {
     vGap: 38,
     startX: 60,
     startY: 60,
-    domHeightsMap
+    domHeightsMap,
+    domWidthsMap
   });
 
   const positions = layoutResult.positions;
@@ -4404,7 +5756,7 @@ function applySugiyamaLayout(autoFit = true) {
       renderEdges();
       saveGraph();
       if (autoFit) fitView();
-      updateStatus("✨ 拓扑已自动规整为因果分层网络！");
+      updateStatus("拓扑已自动规整为因果分层网络");
     }
   }
   requestAnimationFrame(animateEdges);
@@ -4484,13 +5836,226 @@ function updateStatus(text) {
   if (el) el.innerText = text;
 }
 
+/**
+ * 轻量零构建原生语法高亮器
+ * 覆盖 C/C++, x86-64 汇编, Python, Bash, JSON
+ */
+function highlightCode(code, lang = 'c') {
+  if (!code) return '';
+  const safeLang = (lang || 'c').toLowerCase().trim();
+  let str = escapeHtml(code);
+
+  if (safeLang === 'c' || safeLang === 'cpp' || safeLang === 'c++') {
+    const comments = [];
+    str = str.replace(/(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/g, (m) => {
+      const id = `___COMM${comments.length}___`;
+      comments.push(`<span class="tok-comm">${m}</span>`);
+      return id;
+    });
+
+    const strings = [];
+    str = str.replace(/("(\\"|[^"])*?"|'(\\'|[^'])*?')/g, (m) => {
+      const id = `___STR${strings.length}___`;
+      strings.push(`<span class="tok-str">${m}</span>`);
+      return id;
+    });
+
+    str = str.replace(/(#\s*(?:include|define|undef|ifdef|ifndef|if|else|elif|endif|pragma)[^\n]*)/g, '<span class="tok-macro">$1</span>');
+
+    const keywords = /\b(return|if|else|switch|case|default|while|do|for|break|continue|goto|sizeof)\b/g;
+    str = str.replace(keywords, '<span class="tok-kw">$1</span>');
+
+    const types = /\b(int|char|void|pid_t|sigset_t|size_t|ssize_t|bool|float|double|long|short|unsigned|signed|struct|union|enum|typedef|const|static|volatile|auto|register|uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t)\b/g;
+    str = str.replace(types, '<span class="tok-type">$1</span>');
+
+    const sysCalls = /\b(sigprocmask|Sigprocmask|sigemptyset|sigfillset|sigaddset|sigdelset|sigismember|fork|Fork|execve|Execve|waitpid|Waitpid|kill|Kill|setpgid|Setpgid|signal|Signal|pause|sleep|alarm|printf|fprintf|sprintf|malloc|free|exit)\b/g;
+    str = str.replace(sysCalls, '<span class="tok-fn">$1</span>');
+
+    str = str.replace(/\b(0x[0-9a-fA-F]+|\d+)\b/g, '<span class="tok-num">$1</span>');
+
+    strings.forEach((s, i) => { str = str.replace(`___STR${i}___`, s); });
+    comments.forEach((c, i) => { str = str.replace(`___COMM${i}___`, c); });
+    return str;
+  } else if (safeLang === 'assembly' || safeLang === 'asm' || safeLang === 'x86' || safeLang === 'x86_64') {
+    str = str.replace(/\b(movq|movl|movw|movb|pushq|popq|callq|call|retq|ret|jmp|je|jne|js|jns|jg|jge|jl|jle|ja|jae|jb|jbe|test|testq|testl|cmp|cmpq|cmpl|addq|addl|subq|subl|leaq|leal|xorq|xorl|andq|andl|orq|orl|nop|syscall|int)\b/gi, '<span class="tok-kw">$1</span>');
+    str = str.replace(/(%[a-z0-9]+)/gi, '<span class="tok-reg">$1</span>');
+    str = str.replace(/(\$(?:0x[0-9a-fA-F]+|\d+))/g, '<span class="tok-num">$1</span>');
+    str = str.replace(/(#[^\n]*|\/\/[^\n]*)/g, '<span class="tok-comm">$1</span>');
+    return str;
+  } else if (safeLang === 'python' || safeLang === 'py') {
+    str = str.replace(/(#[^\n]*)/g, '<span class="tok-comm">$1</span>');
+    str = str.replace(/("(\\"|[^"])*?"|'(\\'|[^'])*?')/g, '<span class="tok-str">$1</span>');
+    str = str.replace(/\b(def|class|import|from|return|if|elif|else|while|for|in|try|except|finally|with|as|pass|break|continue|lambda|yield|async|await|None|True|False|is|not|and|or)\b/g, '<span class="tok-kw">$1</span>');
+    str = str.replace(/\b(0x[0-9a-fA-F]+|\d+)\b/g, '<span class="tok-num">$1</span>');
+    return str;
+  } else if (safeLang === 'bash' || safeLang === 'sh' || safeLang === 'shell') {
+    str = str.replace(/(#[^\n]*)/g, '<span class="tok-comm">$1</span>');
+    str = str.replace(/("(\\"|[^"])*?"|'(\\'|[^'])*?')/g, '<span class="tok-str">$1</span>');
+    str = str.replace(/\b(echo|cd|ls|export|source|if|then|fi|elif|else|for|in|do|done|while|case|esac|exit|set|shift)\b/g, '<span class="tok-kw">$1</span>');
+    return str;
+  }
+
+  return str;
+}
+
+window.copyRawCodeBlock = function(btn, event) {
+  if (event) event.stopPropagation();
+  const wrapper = btn.closest('.code-block-wrapper');
+  if (!wrapper) return;
+  const stash = wrapper.querySelector('.raw-code-stash');
+  const text = stash ? stash.value : wrapper.querySelector('.code-pre').innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const old = btn.innerText;
+    btn.innerText = '已复制';
+    btn.style.color = '#34d399';
+    setTimeout(() => {
+      btn.innerText = old;
+      btn.style.color = '';
+    }, 1500);
+  }).catch(() => {
+    alert("复制失败，请手动选择复制。");
+  });
+};
+
+window.copySnippetText = function(nodeId, event) {
+  if (event) event.stopPropagation();
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  const text = node.code || node.content || '';
+  navigator.clipboard.writeText(text).then(() => {
+    updateStatus("已复制源码片段至剪贴板！");
+  }).catch(() => {
+    alert("复制失败，请手动选择复制。");
+  });
+};
+
+window.toggleCodeWrap = function(btn, nodeId, event) {
+  if (event) event.stopPropagation();
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  node.isWrap = !node.isWrap;
+  const card = document.querySelector(`.node[data-id="${nodeId}"]`);
+  if (card) {
+    const pre = card.querySelector('.code-pre');
+    if (pre) {
+      pre.classList.toggle('wrap-lines', !!node.isWrap);
+    }
+  }
+  if (btn) {
+    btn.classList.toggle('active', !!node.isWrap);
+  }
+  updateConnectedEdges(nodeId);
+  saveGraph();
+  updateStatus(node.isWrap ? "已开启源码自适应折行" : "已恢复源码单行代码流");
+};
+
+window.toggleDisasmWrap = function(btn, nodeId, event) {
+  if (event) event.stopPropagation();
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  node.isDisasmWrap = !node.isDisasmWrap;
+  const card = document.querySelector(`.node[data-id="${nodeId}"]`);
+  if (card) {
+    const disasmBox = card.querySelector('.disasm-box');
+    if (disasmBox) {
+      disasmBox.classList.toggle('wrap-lines', !!node.isDisasmWrap);
+    }
+  }
+  if (btn) {
+    btn.classList.toggle('active', !!node.isDisasmWrap);
+  }
+  updateConnectedEdges(nodeId);
+  saveGraph();
+  updateStatus(node.isDisasmWrap ? "已开启反汇编自适应折行" : "已恢复反汇编单行指令流");
+};
+
+window.toggleNodeWidth = function(nodeId, event) {
+  if (event) event.stopPropagation();
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  const card = document.querySelector(`.node[data-id="${nodeId}"]`);
+  if (!card) return;
+
+  const defaultWidth = (node.kind === 'source_code' || node.kind === 'hardware_probe') ? 440 : 360;
+  const expandedWidth = 580;
+
+  const currentW = node.width || card.offsetWidth || defaultWidth;
+  let newW = defaultWidth;
+  if (currentW < 520) {
+    newW = expandedWidth;
+  } else {
+    newW = defaultWidth;
+  }
+
+  node.width = newW;
+  card.style.width = newW + 'px';
+  updateConnectedEdges(node.id);
+  saveGraph();
+  updateStatus(newW > defaultWidth ? "已展开宽屏卡片模式 (580px)" : "已恢复紧凑卡片宽度");
+};
+
+function renderRegistersHtml(regs) {
+  if (!regs) return '<div style="color: #64748b; font-size: 10px; grid-column: span 2;">(无寄存器数据)</div>';
+  let entries = [];
+  if (typeof regs === 'object' && !Array.isArray(regs)) {
+    entries = Object.entries(regs);
+  } else if (typeof regs === 'string') {
+    const lines = regs.split(/\r?\n|\s{2,}/);
+    lines.forEach(l => {
+      const match = l.match(/([%a-zA-Z0-9_]+)[:=\s]+(0x[0-9a-fA-F]+|\d+)/);
+      if (match) entries.push([match[1], match[2]]);
+    });
+  }
+  if (entries.length === 0) {
+    return `<div style="color: #94a3b8; font-size: 10px; grid-column: span 2;">${escapeHtml(String(regs))}</div>`;
+  }
+  return entries.slice(0, 16).map(([name, val]) => `
+    <div class="reg-item">
+      <span class="reg-name">${escapeHtml(name.replace(/^%/, ''))}</span>
+      <span class="reg-val">${escapeHtml(String(val))}</span>
+    </div>
+  `).join('');
+}
+
+function formatDisassemblyHtml(disasm) {
+  if (!disasm) return '';
+  // 规范化换行：自适应兼容真实换行符 (\n) 与 JSON 序列化误转义的字面量 ("\\n")
+  let text = String(disasm);
+  text = text.replace(/\\r\\n|\\n|\\r/g, '\n');
+  const lines = text.split(/\r?\n/);
+  return lines.map(line => {
+    const isTarget = line.includes('=>') || line.trim().startsWith('->');
+    const safeLine = escapeHtml(line);
+    if (isTarget) {
+      return `<span class="disasm-active-line">${safeLine}</span>`;
+    }
+    return safeLine;
+  }).join('\n');
+}
+
 function renderMarkdown(text) {
   if (!text) return '';
 
+  const codeBlocks = [];
+  const inlineCodes = [];
   const mathTokens = [];
 
-  // 1. 提取并预渲染块级公式: $$...$$ 或 \[...\]
-  let processed = text
+  // 1. 优先提取并隔离块级代码: ```lang\n...\n``` (防止 * / _ / $ 误转)
+  let processed = text.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
+    const id = `@@FENCEDCODE_${codeBlocks.length}@@`;
+    codeBlocks.push({ lang: lang || 'c', code });
+    return id;
+  });
+
+  // 2. 提取并隔离行内代码: `...`
+  processed = processed.replace(/`([^`\n]+?)`/g, (match, code) => {
+    const id = `@@INLINECODE_${inlineCodes.length}@@`;
+    inlineCodes.push(code);
+    return id;
+  });
+
+  // 3. 提取并预渲染块级公式: $$...$$ 或 \[...\]
+  processed = processed
     .replace(/\$\$([\s\S]+?)\$\$/g, (match, expr) => {
       const id = `@@KATEXDISP${mathTokens.length}@@`;
       let rendered = match;
@@ -4518,7 +6083,7 @@ function renderMarkdown(text) {
       return id;
     });
 
-  // 2. 提取并预渲染行内公式: $...$ 或 \(...\)
+  // 4. 提取并预渲染行内公式: $...$ 或 \(...\)
   processed = processed
     .replace(/\\\(([\s\S]+?)\\\)/g, (match, expr) => {
       const id = `@@KATEXINL${mathTokens.length}@@`;
@@ -4534,7 +6099,6 @@ function renderMarkdown(text) {
       return id;
     })
     .replace(/(?<!\\)\$([^\$\n]+?)(?<!\\)\$/g, (match, expr) => {
-      // 过滤纯货币符号（如 $100）
       if (/^\s*\d+([.,]\d+)?\s*$/.test(expr)) return match;
       const id = `@@KATEXINL${mathTokens.length}@@`;
       let rendered = match;
@@ -4549,7 +6113,7 @@ function renderMarkdown(text) {
       return id;
     });
 
-  // 3. 执行 marked Markdown 解析（@@...@@ 绝不会被 marked 误判为粗体或斜体）
+  // 5. 执行 marked Markdown 解析（@@...@@ 绝不会被 marked 误判为粗体、斜体或指针转义）
   let html = processed;
   if (window.marked && typeof window.marked.parse === 'function') {
     try {
@@ -4565,7 +6129,32 @@ function renderMarkdown(text) {
     html = escapeHtml(processed).replace(/\n/g, '<br/>');
   }
 
-  // 4. 将预渲染好的 KaTeX 纯净 HTML 节点安全还原回流
+  // 6. 还原块级代码与语法高亮
+  codeBlocks.forEach(({ lang, code }, idx) => {
+    const id = `@@FENCEDCODE_${idx}@@`;
+    const snippetId = `snippet_${Date.now()}_${idx}`;
+    const highlighted = highlightCode(code.trim(), lang);
+    const codeHtml = `
+      <div class="code-block-wrapper" id="${snippetId}">
+        <div class="code-block-header">
+          <span class="code-lang-tag">${escapeHtml((lang || 'code').toUpperCase())}</span>
+          <button class="code-copy-btn" onclick="copyRawCodeBlock(this, event)">复制</button>
+        </div>
+        <pre class="code-pre"><code>${highlighted}</code></pre>
+        <textarea class="raw-code-stash" style="display: none;">${escapeHtml(code)}</textarea>
+      </div>
+    `;
+    html = html.split(id).join(codeHtml);
+  });
+
+  // 7. 还原行内代码
+  inlineCodes.forEach((code, idx) => {
+    const id = `@@INLINECODE_${idx}@@`;
+    const inlineHtml = `<code class="inline-code-badge">${escapeHtml(code)}</code>`;
+    html = html.split(id).join(inlineHtml);
+  });
+
+  // 8. 将预渲染好的 KaTeX 纯净 HTML 节点安全还原回流
   mathTokens.forEach(({ id, html: mathHtml }) => {
     html = html.split(id).join(mathHtml);
   });

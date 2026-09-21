@@ -32,10 +32,10 @@ SESSIONS_INDEX_FILE = SESSIONS_DIR / "index.json"
 MATERIALS_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_CONFIG = {
-    "api_base": "https://api.siliconflow.cn/v1",
-    "api_key": "",
-    "model": "deepseek-ai/DeepSeek-V4-Pro",
-    "vision_model": "Qwen/Qwen2.5-VL-72B-Instruct",
+    "api_base": "http://127.0.0.1:8045/v1",
+    "api_key": "sk-antigravity",
+    "model": "gemini-3.8-flash-high",
+    "vision_model": "gemini-3.8-flash-high",
     "temperature": 0.3
 }
 
@@ -374,6 +374,7 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                         "qwen-vl-max",
                         "gemini-3.8-flash-high",
                         "gemini-3.8-flash-medium",
+                        "gemini-3.1-pro",
                         "gemini-2.5-pro",
                         "claude-3-5-sonnet-20241022",
                         "claude-opus-4-5-thinking",
@@ -747,6 +748,47 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(diag, ensure_ascii=False).encode("utf-8"))
             return
 
+        elif parsed.path == "/api/fetch-models":
+            try:
+                req_data = json.loads(post_data.decode("utf-8")) if post_data else {}
+                api_base = (req_data.get("api_base") or "").strip().rstrip("/")
+                api_key = (req_data.get("api_key") or "").strip()
+                if not api_base:
+                    raise ValueError("接口基址 (API Base) 不能为空")
+                
+                models_url = f"{api_base}/models"
+                req = urllib.request.Request(
+                    models_url,
+                    headers={
+                        "Authorization": f"Bearer {api_key}" if api_key else "Bearer sk-antigravity",
+                        "Content-Type": "application/json"
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    raw_models = resp_data.get("data", [])
+                    model_ids = [m.get("id") for m in raw_models if isinstance(m, dict) and m.get("id")]
+                
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "ok": True,
+                    "count": len(model_ids),
+                    "models": model_ids
+                }, ensure_ascii=False).encode("utf-8"))
+            except Exception as e:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "ok": False,
+                    "error": f"从 {api_base}/models 拉取模型列表失败: {str(e)}"
+                }, ensure_ascii=False).encode("utf-8"))
+            return
+
         elif parsed.path == "/api/generate":
             req_data = {}
             api_base = ""
@@ -755,6 +797,8 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 req_data = json.loads(post_data.decode("utf-8"))
                 node_id = req_data.get("nodeId")
                 prompt = req_data.get("prompt", "")
+                neighborhood_context = req_data.get("neighborhood_context")
+                source_anchor = req_data.get("source_anchor")
                 conf = get_config()
                 model = req_data.get("model") or conf.get("model", "deepseek-ai/DeepSeek-V4-Pro")
                 api_base = sanitize_api_base(conf.get("api_base", "https://api.siliconflow.cn/v1"))
@@ -763,13 +807,59 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 req_session_id = req_data.get("sessionId")
                 target_file = get_session_file(req_session_id)
 
+                # 若附带邻域物理切片上下文，注入零幻觉锚定规范与原文物理证据
+                if neighborhood_context and isinstance(neighborhood_context, dict):
+                    doc_name = neighborhood_context.get("doc_name", "文献")
+                    page_range = neighborhood_context.get("page_range")
+                    excerpt = neighborhood_context.get("excerpt", "")
+                    target_page = neighborhood_context.get("target_page")
+                    
+                    pages_str = f"P.{page_range[0]}-{page_range[1]}" if (page_range and len(page_range) >= 2) else f"P.{target_page}"
+                    grounded_inst = (
+                        f"\n\n【文献邻域物理切片锚定规范】\n"
+                        f"当前研读精准锚定文献《{doc_name}》第 {pages_str} 页的物理原文切片。\n"
+                        f"在推演与解答中，必须严格基于切片内的具体公式、实验数据、参数与理论陈述展开论证，"
+                        f"严禁脱离原文空泛臆造。若涉及具体公式或实验结论，请在论述中指明原文具体页码或公式定理标号。\n"
+                        f"邻域物理切片原文：\n```text\n{excerpt[:6500]}\n```\n"
+                    )
+                    prompt = prompt + grounded_inst
+
                 chat_url = f"{api_base}/chat/completions"
+                is_micro_systems = any(k in prompt for k in [
+                    "【底层源码与硬件探针公理实证",
+                    "【底层微观机制与时序深度推导要求】",
+                    "微观机制",
+                    "并发竞态",
+                    "信号掩码",
+                    "SIGCHLD",
+                    "sigprocmask",
+                    "setpgid",
+                    "fork()",
+                    "硬件探针",
+                    "寄存器",
+                    "反汇编"
+                ])
+                if is_micro_systems:
+                    sys_prompt = (
+                        "你是一位精通计算机体系结构、操作系统内核、底层并发与逆向工程的资深系统架构师。\n"
+                        "在面对源码实现、硬件探针与底层系统调用推演时，请展开严密硬核的微观机理推导：\n"
+                        "1. 精准剖析并发竞态条件（Race Conditions）、时序交错（Interleaving）与因果不变量；\n"
+                        "2. 严密追踪内核信号掩码（Signal Mask）状态翻转、异步信号处理函数（SIGCHLD Handler）的不可预测时序；\n"
+                        "3. 剖析进程组拓扑隔离机制（如 setpgid 独立进程组）与前后台作业控制；\n"
+                        "4. 若提供了硬件探针与汇编指令，结合具体寄存器（如 %rax, %rip, %rsp）与栈帧内存状态进行交叉核验与论证。\n"
+                        "推论逻辑严密自洽，提供工业级深度的因果证明与安全边界分析。"
+                    )
+                else:
+                    sys_prompt = (
+                        "你是一位善于化繁为简、生动清晰的学术助手。在解答概念时，请以通俗易懂、重点突出、深入浅出的语言系统解释其核心概念、定义内涵与实际应用，帮助读者快速建立直观理解。除非用户明确要求数学推导，否则无需展开冗长繁复的数学公式与底层微观机理推演。如果提供了上游推演上下文或文献素材，请保持概念的一致性与严谨性。"
+                    )
+
                 payload = {
                     "model": model,
                     "messages": [
                         {
                             "role": "system",
-                            "content": "你是一位善于化繁为简、生动清晰的学术助手。在解答概念时，请以通俗易懂、重点突出、深入浅出的语言系统解释其核心概念、定义内涵与实际应用，帮助读者快速建立直观理解。除非用户明确要求数学推导，否则无需展开冗长繁复的数学公式与底层微观机理推演。如果提供了上游推演上下文或文献素材，请保持概念的一致性与严谨性。"
+                            "content": sys_prompt
                         },
                         {
                             "role": "user",
@@ -802,6 +892,15 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                         if n.get("id") == node_id:
                             n["response"] = answer_text
                             n["status"] = "done"
+                            if source_anchor:
+                                n["source_anchor"] = source_anchor
+                            elif neighborhood_context:
+                                n["source_anchor"] = {
+                                    "doc_name": neighborhood_context.get("doc_name"),
+                                    "page_range": neighborhood_context.get("page_range"),
+                                    "target_page": neighborhood_context.get("target_page"),
+                                    "chapterTitle": neighborhood_context.get("chapterTitle")
+                                }
                             found = True
                             break
                     
@@ -931,6 +1030,336 @@ class ThoughtDAGHandler(SimpleHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(json.dumps(diag, ensure_ascii=False).encode("utf-8"))
+            return
+
+        elif parsed.path == "/api/probe/gdb-dump":
+            try:
+                req_data = json.loads(post_data.decode("utf-8")) if post_data else {}
+                title = req_data.get("title", "").strip()
+                location = req_data.get("location", "").strip()
+                registers = req_data.get("registers") or {}
+                disassembly = req_data.get("disassembly", "").strip()
+                if isinstance(disassembly, str):
+                    disassembly = disassembly.replace("\\r\\n", "\n").replace("\\n", "\n").strip()
+                stack = req_data.get("stack", "").strip()
+                if isinstance(stack, str):
+                    stack = stack.replace("\\r\\n", "\n").replace("\\n", "\n").strip()
+                notes = req_data.get("notes", "").strip()
+                target_node_id = req_data.get("targetNodeId")
+                req_session_id = req_data.get("sessionId")
+
+                idx = get_sessions_index()
+                active_id = idx.get("activeId", "session_default")
+                curr_id = req_session_id or active_id
+                target_file = get_session_file(curr_id)
+
+                graph = {"nodes": [], "edges": []}
+                if target_file.exists():
+                    try:
+                        with open(target_file, "r", encoding="utf-8") as f:
+                            graph = json.load(f)
+                    except Exception as fe:
+                        print("读取图谱失败:", fe)
+
+                new_node_id = f"n_probe_{int(time.time() * 1000)}"
+                node_title = title or (f"GDB 硬件探针 · {location}" if location else "GDB 硬件探针快照")
+
+                # 计算初始坐标
+                x = 60
+                y = 80
+                target_node = None
+                if target_node_id:
+                    target_node = next((n for n in graph.get("nodes", []) if n.get("id") == target_node_id), None)
+                
+                if target_node:
+                    x = max(40, target_node.get("x", 460) - 420)
+                    y = target_node.get("y", 100)
+                else:
+                    # 查找最左侧边界以合理并列
+                    existing_probes = [n for n in graph.get("nodes", []) if n.get("kind") in ["hardware_probe", "source_code", "material"]]
+                    if existing_probes:
+                        last_p = existing_probes[-1]
+                        x = last_p.get("x", 60)
+                        y = last_p.get("y", 60) + 320
+                    elif graph.get("nodes"):
+                        first_n = graph["nodes"][0]
+                        x = max(40, first_n.get("x", 400) - 420)
+                        y = first_n.get("y", 80)
+
+                probe_node = {
+                    "id": new_node_id,
+                    "kind": "hardware_probe",
+                    "title": node_title,
+                    "location": location,
+                    "registers": registers,
+                    "disassembly": disassembly,
+                    "stack": stack,
+                    "notes": notes,
+                    "status": "idle",
+                    "x": x,
+                    "y": y,
+                    "createdAt": int(time.time() * 1000)
+                }
+
+                graph.setdefault("nodes", []).append(probe_node)
+
+                # 自动构建拓扑连线
+                if target_node_id and target_node:
+                    edge_id = f"e_{new_node_id}_{target_node_id}"
+                    graph.setdefault("edges", []).append({
+                        "id": edge_id,
+                        "source": new_node_id,
+                        "target": target_node_id,
+                        "kind": "solid"
+                    })
+
+                with open(target_file, "w", encoding="utf-8") as wf:
+                    json.dump(graph, wf, ensure_ascii=False, indent=2)
+
+                if curr_id == active_id:
+                    sync_active_to_legacy_graph(active_id)
+
+                for s in idx.get("sessions", []):
+                    if s["id"] == curr_id:
+                        s["nodeCount"] = len(graph.get("nodes", []))
+                        s["updatedAt"] = int(time.time() * 1000)
+                        break
+                save_sessions_index(idx)
+
+                print(f"[+] [PROBE] 已成功挂载硬件探针节点 #{new_node_id} ({node_title}) -> 课题: {curr_id}")
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "ok": True,
+                    "nodeId": new_node_id,
+                    "node": probe_node,
+                    "mtime": target_file.stat().st_mtime
+                }, ensure_ascii=False).encode("utf-8"))
+            except Exception as e:
+                print("[-] 硬件探针上报处理异常:", e)
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode("utf-8"))
+            return
+
+        elif parsed.path == "/api/paper-neighborhood":
+            try:
+                print(f"[+] /api/paper-neighborhood hit: length={len(post_data)}")
+                req_data = json.loads(post_data.decode("utf-8")) if post_data else {}
+                doc_name = urllib.parse.unquote(req_data.get("doc_name", "")).strip()
+                page = int(req_data.get("page", 1))
+                window = int(req_data.get("window", 2))
+                print(f"[+] doc_name='{doc_name}', page={page}, window={window}")
+                
+                if not doc_name:
+                    raise ValueError("未指定文献文件名 (doc_name)")
+                
+                safe_name = os.path.basename(doc_name).replace("/", "").replace("\\", "").replace("..", "")
+                target_path = MATERIALS_DIR / safe_name
+                print(f"[+] target_path: {target_path} (exists={target_path.exists()})")
+                if not target_path.exists():
+                    raise FileNotFoundError(f"文献文件不存在: {safe_name}")
+                
+                ext = target_path.suffix.lower()
+                if ext == ".pdf":
+                    try:
+                        import pypdf
+                    except ImportError:
+                        raise RuntimeError("本地 Python 环境未安装 pypdf，请先执行 pip install pypdf")
+                    
+                    reader = pypdf.PdfReader(str(target_path))
+                    total_pages = len(reader.pages)
+                    start_page = max(1, page - window)
+                    end_page = min(total_pages, page + window)
+                    
+                    excerpts = []
+                    for p in range(start_page, end_page + 1):
+                        txt = reader.pages[p - 1].extract_text() or ""
+                        excerpts.append(f"=== 第 {p} 页 ===\n{txt.strip()}")
+                    
+                    excerpt_text = "\n\n".join(excerpts)
+                    res_data = {
+                        "ok": True,
+                        "doc_name": safe_name,
+                        "target_page": page,
+                        "page_range": [start_page, end_page],
+                        "total_pages": total_pages,
+                        "excerpt": excerpt_text,
+                        "char_count": len(excerpt_text)
+                    }
+                else:
+                    # 文本类文件 (Markdown, TXT, C 等)
+                    with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+                        lines = f.readlines()
+                    total_lines = len(lines)
+                    start_line = max(1, (page - window - 1) * 45 + 1)
+                    end_line = min(total_lines, (page + window) * 45)
+                    slice_lines = lines[start_line - 1:end_line]
+                    excerpt_text = "".join(slice_lines)
+                    res_data = {
+                        "ok": True,
+                        "doc_name": safe_name,
+                        "target_page": page,
+                        "page_range": [start_line, end_line],
+                        "total_pages": max(1, (total_lines + 44) // 45),
+                        "excerpt": excerpt_text,
+                        "char_count": len(excerpt_text)
+                    }
+                
+                out_bytes = json.dumps(res_data, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(out_bytes)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(out_bytes)
+                print(f"[+] /api/paper-neighborhood response sent: {len(out_bytes)} bytes")
+            except Exception as e:
+                print("[-] paper-neighborhood error:", e)
+                err_bytes = json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(err_bytes)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(err_bytes)
+            return
+
+        elif parsed.path == "/api/paper-outline":
+            try:
+                req_data = json.loads(post_data.decode("utf-8")) if post_data else {}
+                doc_name = urllib.parse.unquote(req_data.get("doc_name", "")).strip()
+                ai_fallback = bool(req_data.get("ai_fallback", False))
+                
+                if not doc_name:
+                    raise ValueError("未指定文献文件名 (doc_name)")
+                
+                safe_name = os.path.basename(doc_name).replace("/", "").replace("\\", "").replace("..", "")
+                target_path = MATERIALS_DIR / safe_name
+                if not target_path.exists():
+                    raise FileNotFoundError(f"文献文件不存在: {safe_name}")
+                
+                ext = target_path.suffix.lower()
+                outline_items = []
+                source = "native"
+                
+                if ext == ".pdf":
+                    import pypdf
+                    reader = pypdf.PdfReader(str(target_path))
+                    total_pages = len(reader.pages)
+                    
+                    if not ai_fallback and reader.outline:
+                        def parse_pdf_outline(outline_list, level=1):
+                            res = []
+                            for item in outline_list:
+                                if isinstance(item, list):
+                                    res.extend(parse_pdf_outline(item, level + 1))
+                                else:
+                                    try:
+                                        title = getattr(item, "title", str(item)).strip()
+                                        try:
+                                            dest_page = reader.get_destination_page_number(item) + 1
+                                        except Exception:
+                                            dest_page = None
+                                        res.append({
+                                            "title": title,
+                                            "page": dest_page,
+                                            "level": level
+                                        })
+                                    except Exception:
+                                        pass
+                            return res
+                        
+                        outline_items = parse_pdf_outline(reader.outline)
+                    
+                    # 若没有原生大纲或请求了 AI 骨架 fallback
+                    if (not outline_items or ai_fallback) and total_pages > 0:
+                        toc_text = ""
+                        for p in range(1, min(16, total_pages + 1)):
+                            p_txt = reader.pages[p - 1].extract_text() or ""
+                            if "目" in p_txt and "录" in p_txt:
+                                toc_text += f"\n--- 第 {p} 页 ---\n" + p_txt
+                        
+                        if not toc_text:
+                            for p in range(1, min(6, total_pages + 1)):
+                                toc_text += f"\n--- 第 {p} 页 ---\n" + (reader.pages[p - 1].extract_text() or "")[:1500]
+                        
+                        conf = get_config()
+                        api_base = conf.get("api_base", "http://127.0.0.1:8046/v1")
+                        api_key = conf.get("api_key", "")
+                        model = conf.get("model", "gemini-3.8-flash-high")
+                        
+                        toc_prompt = (
+                            "你是一位资深学术文献分析专家。请从以下文献文本中精准提取出结构化章节大纲（包含章、节标题及对应物理页码）。\n"
+                            "严格只输出合法的 JSON 数组，严禁任何 Markdown 包裹（不要包含 ```json 标签），格式如下：\n"
+                            '[{"title": "1 绪论", "page": 21, "level": 1}, {"title": "1.1 研究背景", "page": 21, "level": 2}]\n'
+                            "若无法确切确定页码，page 字段可填 null。\n"
+                            f"文献内容如下：\n{toc_text[:7000]}"
+                        )
+                        chat_url = f"{api_base}/chat/completions"
+                        payload = {
+                            "model": model,
+                            "messages": [{"role": "user", "content": toc_prompt}],
+                            "temperature": 0.1
+                        }
+                        req = urllib.request.Request(
+                            chat_url,
+                            data=json.dumps(payload).encode("utf-8"),
+                            headers={
+                                "Authorization": f"Bearer {api_key}",
+                                "Content-Type": "application/json"
+                            }
+                        )
+                        with urllib.request.urlopen(req, timeout=30) as res:
+                            res_json = json.loads(res.read().decode("utf-8"))
+                            raw_ai_text = res_json["choices"][0]["message"]["content"].strip()
+                            if raw_ai_text.startswith("```"):
+                                raw_ai_text = raw_ai_text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                            try:
+                                outline_items = json.loads(raw_ai_text)
+                                source = "ai"
+                            except Exception as pe:
+                                print("AI 目录 JSON 解析失败:", pe, raw_ai_text[:200])
+                else:
+                    with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+                        lines = f.readlines()
+                    for idx, line in enumerate(lines):
+                        stripped = line.strip()
+                        if stripped.startswith("#"):
+                            level = len(stripped.split()[0])
+                            title = stripped.lstrip("#").strip()
+                            outline_items.append({
+                                "title": title,
+                                "page": idx + 1,
+                                "level": level
+                            })
+                    source = "markdown"
+                
+                out_bytes = json.dumps({
+                    "ok": True,
+                    "doc_name": safe_name,
+                    "outline": outline_items,
+                    "source": source
+                }, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(out_bytes)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(out_bytes)
+            except Exception as e:
+                err_bytes = json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(err_bytes)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(err_bytes)
             return
 
         self.send_response(404)
