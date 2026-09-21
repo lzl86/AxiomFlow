@@ -750,7 +750,6 @@ async function generateAnswerForNode(node) {
     liveNode.status = 'idle';
     updateStatus(`❌ 网络异常: ${err.message}`);
   } finally {
-  } finally {
     saveGraph();
     renderNodes();
     requestAnimationFrame(() => renderEdges());
@@ -1027,10 +1026,10 @@ async function initDocumentSystem() {
       if (currentDocMode !== 'pdf') return;
       handlePdfTextSelection(e);
     };
-    pdfViewContainer.onscroll = () => {
+    pdfViewContainer.addEventListener('scroll', () => {
+      saveReadingBreakpoint();
       updateReadingProgressBar(pdfViewContainer);
-    };
-  }
+    }, { passive: true });
   }
 
   // 本地文件上传与解析
@@ -1266,6 +1265,9 @@ async function loadPdfDocument(source, docTitle, savedState = null) {
   }
 
   try {
+    savedState = savedState ? { ...savedState } : null;
+    clearTimeout(breakpointSaveTimer);
+    isRestoringBreakpoint = true;
     updateStatus(`正在载入文献 PDF: ${docTitle} ...`);
     switchDocMode('pdf');
     currentDocTitle = docTitle;
@@ -1296,15 +1298,14 @@ async function loadPdfDocument(source, docTitle, savedState = null) {
 
     // 毫秒级无损复原断点滚动位置
     if (savedState && (savedState.scrollTop || savedState.currentPage > 1)) {
-      isRestoringBreakpoint = true;
       const viewContainer = document.getElementById('pdf-view-container');
       if (savedState.scrollTop && viewContainer) {
         viewContainer.scrollTop = savedState.scrollTop;
       } else {
         scrollToPage(targetPage, false);
       }
-      setTimeout(() => { isRestoringBreakpoint = false; }, 350);
     }
+    setTimeout(() => { isRestoringBreakpoint = false; }, 350);
 
     // Phase 2: 续读断点与批注引导
     if (savedState && savedState.currentPage > 1) {
@@ -1316,6 +1317,7 @@ async function loadPdfDocument(source, docTitle, savedState = null) {
 
     updateStatus(`PDF 已成功载入，共 ${currentPdfDoc.numPages} 页（已恢复至上次阅读位置）`);
   } catch (err) {
+    isRestoringBreakpoint = false;
     console.error("载入 PDF 失败:", err);
     updateStatus(`载入 PDF 异常: ${err.message}`);
   }
@@ -1646,6 +1648,7 @@ async function buildContinuousScrollLayout() {
 }
 
 function updateCurrentPageOnScroll() {
+  if (isRestoringBreakpoint) return;
   if (!currentPdfDoc || currentDocMode !== 'pdf') return;
   const viewContainer = document.getElementById('pdf-view-container');
   if (!viewContainer) return;
@@ -1916,6 +1919,8 @@ function setupDrawerResizer() {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   };
+}
+
 // ==========================================
 // Phase 1: 教材阅读学习批注系统 (Annotation & Note Bubbles)
 // ==========================================
@@ -2422,17 +2427,27 @@ function initReaderAnnotationSystem() {
   if (noteInput) {
     noteInput.oninput = () => {
       if (!currentActiveAnnotation) return;
-      currentActiveAnnotation.note = noteInput.value;
-      currentActiveAnnotation.updatedAt = new Date().toISOString();
+      const annotationId = currentActiveAnnotation.id;
+      const annotation = (graph.annotations || []).find(a => a.id === annotationId);
+      if (!annotation) return;
+      currentActiveAnnotation = annotation;
+      annotation.note = noteInput.value;
+      annotation.updatedAt = new Date().toISOString();
+      const annotationSessionId = currentSessionId;
 
       const saveStatus = document.getElementById('bubble-save-status');
       if (saveStatus) saveStatus.innerText = '正在保存...';
 
       clearTimeout(noteDebounceTimer);
       noteDebounceTimer = setTimeout(() => {
+        if (currentSessionId !== annotationSessionId) return;
+        const annotation = (graph.annotations || []).find(a => a.id === annotationId);
+        if (!annotation) return;
         debouncedSave();
-        if (saveStatus) saveStatus.innerText = '已自动保存';
-        renderAnnotationsForPage(currentActiveAnnotation.page);
+        if (saveStatus && currentActiveAnnotation?.id === annotationId) {
+          saveStatus.innerText = '已自动保存';
+        }
+        renderAnnotationsForPage(annotation.page);
         renderAnnotationsSidebar();
       }, 400);
     };
